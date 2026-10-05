@@ -1,6 +1,8 @@
 export type ConnectorStatus = { installed: boolean; version?: string; hostPermission?: boolean };
 let status: ConnectorStatus = { installed: false };
 let checking: Promise<ConnectorStatus> | undefined;
+// Hot paths reuse this result. Re-checks come from the content script's ready message, tab visibility and the settings page.
+let checked = false;
 const subscribers = new Set<(status: ConnectorStatus) => void>();
 function publish(next: ConnectorStatus) {
   if (JSON.stringify(next) === JSON.stringify(status)) return;
@@ -11,7 +13,7 @@ export function onConnectorStatusChange(cb: (status: ConnectorStatus) => void) {
 export function getConnectorStatus(): Promise<ConnectorStatus> {
   return checking ??= connectorCall('hello', {}, undefined, 500).then(value => {
     publish({ installed: true, version: String(value.version), hostPermission: value.hostPermission === true }); return { ...status };
-  }, () => { publish({ installed: false }); return { ...status }; }).finally(() => { checking = undefined; });
+  }, () => { publish({ installed: false }); return { ...status }; }).finally(() => { checked = true; checking = undefined; });
 }
 window.addEventListener('message', event => {
   if (event.source !== window || event.origin !== location.origin) return;
@@ -38,7 +40,8 @@ export function connectorCall(type: string, args: any = {}, signal?: AbortSignal
   });
 }
 export async function connectorAvailable() {
-  return status.installed || (await getConnectorStatus()).installed;
+  if (status.installed || checked) return status.installed;
+  return (checking ?? getConnectorStatus()).then(value => value.installed);
 }
 export async function connectorHttp(input: any, signal?: AbortSignal) {
   const { token } = await connectorCall('begin', { action: 'videos' }, signal);

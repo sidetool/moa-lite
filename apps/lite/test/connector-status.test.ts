@@ -15,6 +15,8 @@ test('negative detection retries on ready and visibility; UI subscriptions unsub
   const context: any = { window, document, location: { origin: 'https://app.example.org' }, setTimeout, clearTimeout };
   runInNewContext(outputFiles![0].text, context);
   assert.equal(await context.client.connectorAvailable(), false);
+  // Hot paths must not wait for another handshake timeout after a negative result.
+  assert.equal(await context.client.connectorAvailable(), false); assert.equal(calls, 1);
   const updates: any[] = []; const unsubscribe = context.client.onConnectorStatusChange((value: any) => updates.push(value));
   installed = true; dispatch({ channel: 'moa-lite-connector-ready-v1', version: '0.1.0' });
   await new Promise(resolve => setImmediate(resolve));
