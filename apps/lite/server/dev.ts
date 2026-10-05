@@ -6,6 +6,6 @@ if (!process.env.UPSTASH_REDIS_REST_URL) console.info('Local development uses me
 const app = createLiteApplication({ dev: true, origin, secret: process.env.APP_SECRET ?? 'moa-lite-local-development-secret-only', setupCode: process.env.SETUP_CODE ?? 'LITE-LOCA-LSET-UP01' });
 const api = createServer(app.handle); api.listen(5181, '127.0.0.1');
 process.env.VITE_MOA_LITE = '1';
-const vite = await viteServer({ configFile: new URL('../../../apps/web/vite.config.ts', import.meta.url).pathname, root: new URL('../../../apps/web/', import.meta.url).pathname, server: { host: '127.0.0.1', port: Number(new URL(origin).port) || 5180, strictPort: true, proxy: { '/api': 'http://127.0.0.1:5181', '/__moa': 'http://127.0.0.1:5181' } } });
+const vite = await viteServer({ configFile: new URL('../../../apps/web/vite.config.ts', import.meta.url).pathname, root: new URL('../../../apps/web/', import.meta.url).pathname, server: { host: '127.0.0.1', port: Number(new URL(origin).port) || 5180, strictPort: true, proxy: { '/api': { target: 'http://127.0.0.1:5181', changeOrigin: false }, '/__moa': { target: 'http://127.0.0.1:5181', changeOrigin: false } } } });
 await vite.listen(); console.info(`moa-lite: ${origin} · setup code: ${process.env.SETUP_CODE ?? 'LITE-LOCA-LSET-UP01'}`);
 process.on('SIGTERM', () => { api.close(); void vite.close(); });

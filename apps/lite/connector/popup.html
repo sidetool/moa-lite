@@ -1,12 +1,81 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>moa-lite 연결</title>
-<style>body{font:15px system-ui;min-width:300px;max-width:480px;margin:20px}button,input{padding:8px;margin:4px 0}section{margin:16px 0;overflow-wrap:anywhere}[hidden]{display:none}</style></head>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>moa-lite 연결</title>
+<style>
+:root{--bg:#09090b;--surface:#16161a;--surface2:#202026;--line:#2c2c34;--text:#f2f2f5;--text2:#a7a7b2;--text3:#73737e;--accent:#8b6cff;--success:#3ecf8e;--warning:#f0b44c;--danger:#ff6b6b;font:14px/1.5 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;color:var(--text);background:var(--bg)}
+*{box-sizing:border-box}
+body{margin:0;width:340px;padding:16px}
+body.page{width:auto;min-height:100vh;display:grid;place-items:start center;padding:12vh 20px 40px}
+body.page main{width:min(440px,100%)}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.logo{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--accent);color:#fff;font-weight:800;font-size:13px;letter-spacing:-.04em}
+h1{margin:0;font-size:15px;font-weight:700;letter-spacing:-.02em}
+h2{margin:0 0 8px;font-size:12px;font-weight:650;color:var(--text3)}
+p{margin:0}
+.lead{color:var(--text2);margin-bottom:14px}
+section{margin-top:14px}
+[hidden]{display:none!important}
+.card{padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.card.ok{border-color:color-mix(in srgb,var(--success) 40%,transparent)}
+.state{display:flex;align-items:center;gap:10px}
+.state>div{flex:1;min-width:0;display:grid;gap:1px}
+.dot{width:9px;height:9px;flex:none;border-radius:50%;background:var(--text3)}
+.dot.ok{background:var(--success);box-shadow:0 0 0 4px color-mix(in srgb,var(--success) 22%,transparent)}
+.origin{font-weight:700;overflow-wrap:anywhere}
+small{color:var(--text3);font-size:12px}
+.row{display:flex;gap:8px;margin-top:12px}
+button{min-height:36px;padding:0 14px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+button:hover{border-color:var(--text3)}
+button.primary{border-color:var(--accent);background:var(--accent);color:#fff}
+button.text{min-height:28px;padding:0 8px;border:0;background:none;color:var(--text2);font-weight:500}
+button.text:hover{color:var(--text)}
+.row button{flex:1}
+.candidates{display:grid;gap:8px}
+.candidate{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.candidate span{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}
+.candidate em{font-style:normal;font-size:11px;color:var(--text3);font-weight:500;display:block}
+form{display:grid;gap:8px}
+label{font-size:12px;font-weight:650;color:var(--text3)}
+input[type=text]{width:100%;height:38px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font:inherit}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.divider{display:flex;align-items:center;gap:10px;margin:14px 0 10px;color:var(--text3);font-size:12px}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+#status{min-height:0;margin-top:10px;font-size:12px;color:var(--warning)}
+#status:empty{display:none}
+#grant-permission{width:100%;margin-top:12px;border-color:var(--warning);color:var(--warning);background:transparent}
+.toggle{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--surface);cursor:pointer;color:var(--text);font-size:13px;font-weight:500}
+.toggle input{width:16px;height:16px;accent-color:var(--accent)}
+.toggle span{flex:1;min-width:0;overflow-wrap:anywhere}
+ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+li{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:9px;background:var(--surface)}
+li span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:13px}
+.hint{margin-top:8px;color:var(--text3);font-size:12px}
+</style></head>
 <body><main>
-<h1 id="heading">moa-lite 앱 주소 연결</h1>
+<header><span class="logo" aria-hidden="true">M</span><h1 id="heading">moa-lite 앱 주소 연결</h1></header>
+
+<section id="setup" style="margin-top:0">
+  <p class="lead">연결할 moa-lite 앱 주소를 정해 주세요. 한 번 정하면 그대로 고정되고, 나중에 바꿀 수 있어요.</p>
+  <div id="candidates-wrap" hidden><h2>열려 있는 탭</h2><div id="candidates" class="candidates"></div></div>
+  <p id="current-origin" hidden></p><button id="use-current" hidden>이 탭 주소로 연결</button>
+  <div class="divider" id="divider" hidden>또는 직접 입력</div>
+  <form id="address-form"><label for="address">앱 주소</label><input id="address" type="text" placeholder="https://내-앱.vercel.app" autocomplete="off" spellcheck="false" required><button type="submit" class="primary">저장</button></form>
+  <button id="cancel-edit" class="text" type="button" hidden>취소</button>
+</section>
+
+<section id="connected" hidden style="margin-top:0">
+  <div class="card ok" id="connected-card">
+    <div class="state"><span class="dot ok" id="connection-dot" aria-hidden="true"></span><div><span class="origin" id="app-origin"></span><small id="connection-status"></small></div></div>
+    <div class="row"><button id="open-app" class="primary">앱 열기</button><button id="change-address">주소 변경</button></div>
+  </div>
+</section>
+
 <p id="status" role="status"></p>
-<section id="setup"><p id="current-origin"></p><button id="use-current" hidden>이 탭 주소로 연결</button>
-<form id="address-form"><label for="address">앱 주소</label><input id="address" type="text" placeholder="https://내-앱.vercel.app" required><button type="submit">저장</button></form></section>
-<section id="connected" hidden><p id="app-origin"></p><p id="connection-status"></p><button id="change-address">주소 변경</button> <button id="open-app">앱 열기</button></section>
-<button id="grant-permission" hidden>권한 허용</button>
-<section id="login-section" hidden><h2>로그인 사용 사이트</h2><p>허용한 사이트에만 로그인 쿠키를 사용합니다.</p><label id="login-toggle-label" hidden><input id="login-toggle" type="checkbox">이 사이트에 로그인 쿠키 사용 <span id="login-origin"></span></label><ul id="login-sites"></ul></section>
+<button id="grant-permission" hidden>사이트 접근 권한 허용</button>
+
+<section id="login-section" hidden>
+  <h2>로그인 쿠키</h2>
+  <label class="toggle" id="login-toggle-label" hidden><input id="login-toggle" type="checkbox"><span>이 사이트에 로그인 쿠키 사용<br><small id="login-origin"></small></span></label>
+  <ul id="login-sites"></ul>
+  <p class="hint">기본으로는 쿠키를 보내지 않아요. 로그인이 필요한 소스만 켜 주세요.</p>
+</section>
 </main><script src="popup.js"></script></body></html>

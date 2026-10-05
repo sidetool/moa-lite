@@ -1,12 +1,13 @@
 import { remotePreference, setRemotePreference, type RemotePreference } from "../lib/remote";
 import { NavigationSettings } from "../components/NavigationSettings";
 import { devicePrefs, setDevicePref, type DevicePrefs } from "../lib/device-prefs";
-import { Globe, Info, ChevronRight, Folder, FolderOpen, FolderPlus, RefreshCw, Trash2, Tv, X } from "lucide-react";
+import { Globe, Info, ChevronRight, Puzzle, Folder, FolderOpen, FolderPlus, RefreshCw, Trash2, Tv, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LibraryFolder, MediaType, ScanStatus, Settings } from "@moa/shared";
 import { NetworkSettings } from "../components/NetworkSettings";
+import { connectorSummary, useConnectorStatus } from "./ConnectorPage";
 import { TmdbSettings } from "../components/TmdbSettings";
 import { TranslationSettings } from "../components/TranslationSettings";
 import { SubtitleAdvancedSettings } from "../components/SubtitleAdvancedSettings";
@@ -219,6 +220,7 @@ export function SettingsPage() {
         </div>
       </section>
       <section className="settings-group"><h2>이 기기</h2><div className="settings-card">
+        {import.meta.env.VITE_MOA_LITE === "1" && <ConnectorLink />}
         {row("재생 시 전체 화면", "작품을 누르면 바로 전체 화면으로 재생합니다. 끄면 재생 화면에서 직접 전환해요.", <Toggle label="재생 시 전체 화면" checked={device.fullscreenOnPlay} onChange={value => setPref("fullscreenOnPlay", value)} />)}
         {row("오프닝·엔딩 자동 건너뛰기", "구간 정보가 있는 회차에서 오프닝과 엔딩을 알아서 넘깁니다. 되감으면 다시 볼 수 있어요.", <Toggle label="오프닝·엔딩 자동 건너뛰기" checked={device.autoSkip} onChange={value => setPref("autoSkip", value)} />)}
         {row("빠른 탐색 간격", "두 번 탭, 앞으로·뒤로 버튼과 J·L 키로 이동하는 시간", <select className="setting-select" aria-label="빠른 탐색 간격" value={device.seekStep} onChange={e => setPref("seekStep", Number(e.target.value) as DevicePrefs["seekStep"])}>{[5, 10, 15, 30].map(v => <option key={v} value={v}>{v}초</option>)}</select>)}
@@ -247,4 +249,9 @@ export function SettingsPage() {
       {import.meta.env.VITE_MOA_LITE !== "1" && <NetworkSettings />}</>}
     </div>
   );
+}
+
+function ConnectorLink() {
+  const status = useConnectorStatus();
+  return <Link to="/settings/connector" className="setting setting-link"><span className="setting-icon"><Puzzle size={20} /></span><div><b>연결 확장</b><small>{connectorSummary(status)}</small></div><ChevronRight size={18} /></Link>;
 }

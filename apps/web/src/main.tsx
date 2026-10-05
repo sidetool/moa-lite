@@ -1,5 +1,6 @@
 import { AboutPage } from './pages/AboutPage';
 import { DiagnosticsPage } from './pages/DiagnosticsPage';
+import { ConnectorPage } from './pages/ConnectorPage';
 import { RemoteAccessPage } from './pages/RemoteAccessPage';
 import { installPlaybackFullscreen } from "./lib/playback-fullscreen";
 import { installRemoteNavigation } from "./lib/remote";
@@ -88,6 +89,7 @@ const router = createBrowserRouter([
       { path: "/about", element: <AboutPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "/settings/tabs", element: <SettingsPage /> },
+      { path: "/settings/connector", element: import.meta.env.VITE_MOA_LITE === '1' ? <ConnectorPage /> : <Navigate to="/settings" replace /> },
       { path: "/settings/diagnostics", element: import.meta.env.VITE_MOA_LITE === '1' ? <RequireAdmin><DiagnosticsPage /></RequireAdmin> : <Navigate to="/settings" replace /> },
       { path: "/me", element: <MePage /> },
       { path: "*", element: <Navigate to="/" replace /> }
