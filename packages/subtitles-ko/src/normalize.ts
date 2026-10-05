@@ -44,7 +44,7 @@ export function parseEpisodes(raw: string): number[] {
   }
   const explicit = [...text.matchAll(/(?:\bS\d{1,2}E|\bEP?(?:ISODE)?\s*|第|#)(\d{1,4}(?:\.\d)?)(?!\d)|(?<!\d)(\d{1,4}(?:\.\d)?)\s*(?:화|話)(?!\p{L})/giu)];
   if (explicit.length) return [...new Set(explicit.map(m => Number(m[1] ?? m[2])))];
-  text = text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\.(?:ass|ssa|smi|srt|vtt|zip)$/i, " ");
+  text = text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\.(?:ass|ssa|smi|srt|vtt|zip|7z|rar|tar)$/i, " ");
   text = text.replace(seasonPattern, " ").replace(/\b\d{3,4}p\b/gi, " ");
   const range = text.match(/(?:^|\s)(\d{1,3})\s*[~～]\s*(\d{1,3})(?=\s|$)/);
   if (range) {

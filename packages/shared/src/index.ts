@@ -241,7 +241,13 @@ export interface OnlineSubtitleQuery {
   warnings?: string[];
 }
 
+export interface OnlineSubtitleIssue {
+  kind: 'access-denied' | 'timeout' | 'fetch-failed' | 'not-found';
+  creatorName?: string;
+}
 export interface OnlineSubtitleSearch {
+  /** Summarized failures without network URLs or raw exception text. */
+  issues?: OnlineSubtitleIssue[];
   query?: OnlineSubtitleQuery;
   /** False when numbering requires user review. Manual application is still allowed. */
   autoApply?: boolean;

@@ -1145,7 +1145,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
                         </button>
                       )}
                       {online.result.autoApply === false && online.result.candidates.length > 0 && <p className="panel-note note-warn">회차 번호가 확실하지 않아 자동으로 적용하지 않았어요. 맞는 자막을 골라 주세요.</p>}
-                      {online.result.candidates.length === 0 && <p className="panel-note">‘{online.result.resolvedTitle}’ 자막을 찾지 못했어요.{online.result.query ? " 제목이나 시즌·화수를 바꿔서 다시 찾아보세요." : ""}</p>}
+                      {online.result.candidates.length === 0 && <p className="panel-note">‘{online.result.resolvedTitle}’ 자막을 가져오지 못했어요.{online.result.issues?.some(issue => issue.kind === 'access-denied') ? " 제작자 사이트에서 접속을 차단했어요. 자막이 없는 것은 아닐 수 있어요." : online.result.issues?.some(issue => issue.kind === 'timeout') ? " 검색 시간이 초과됐어요. 잠시 후 다시 시도해 주세요." : online.result.query ? " 제목이나 시즌·화수를 바꿔서 다시 찾아보세요." : ""}</p>}
                       {online.result.candidates.map(candidate => {
                         const applied = subtitle?.provenance?.creatorName === candidate.creatorName && extraSubs.some(track => track.id === subtitle?.id);
                         const q = online.result!.query;

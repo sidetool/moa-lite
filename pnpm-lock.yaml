@@ -224,6 +224,9 @@ importers:
       iconv-lite:
         specifier: 0.7.0
         version: 0.7.0
+      libarchive-wasm:
+        specifier: 1.2.0
+        version: 1.2.0
       yauzl:
         specifier: 3.4.0
         version: 3.4.0
@@ -1650,6 +1653,9 @@ packages:
 
   lfa-ponyfill@1.1.1:
     resolution: {integrity: sha512-Had4tsGEHtIj58MRtf6SlubNDltxinxMSdxIn1GdwrWbye8TD+pZ+D6qKETnJ9+vQOfG9q/Ds4WUPskhyAMp5Q==}
+
+  libarchive-wasm@1.2.0:
+    resolution: {integrity: sha512-aunFn8oL9VwGRj+brRvdOv8BRUD4Ea1WxJW45IdiuXE2Vp/m/X+M1UxSU+yPzXfc1mPPC8AARaflg/CtF11u8g==}
 
   light-my-request@6.6.0:
     resolution: {integrity: sha512-CHYbu8RtboSIoVsHZ6Ye4cj4Aw/yg2oAFimlF7mNvfDV192LR7nDiKtSIfCuLT7KokPSTn/9kfVLm5OGN0A28A==}
@@ -3383,6 +3389,8 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   lfa-ponyfill@1.1.1: {}
+
+  libarchive-wasm@1.2.0: {}
 
   light-my-request@6.6.0:
     dependencies:

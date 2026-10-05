@@ -6,7 +6,8 @@ import { decrypt, encrypt } from './secrets.js';
 import { synchronize } from './sync.js';
 import { sourceHttp } from './network.js';
 import { Gemini, MODEL, validModel, validGeminiKey } from '../../../apps/server/src/translation/gemini.js';
-import { convertSubtitle, createSubtitleClient } from '@moa/subtitles-ko';
+import { convertSubtitle } from '@moa/subtitles-ko';
+import { searchOnlineSubtitles } from './subtitles.js';
 import { parseRepository } from '@moa/extensions';
 import { Jimaku } from '../../../apps/server/src/translation/jimaku.js';
 import { Store } from '../../../apps/server/src/db.js';
@@ -181,8 +182,7 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
       if (path === '/api/lite/convert' && req.method === 'POST') { if (typeof input.content !== 'string' || Buffer.byteLength(input.content) > 1024 * 1024) throw new Error('invalid-request'); json(res, 200, convertSubtitle(input.content, input.format)); return; }
       if (path === '/api/lite/subtitles' && req.method === 'POST') {
         if (typeof input.title !== 'string' || input.title.length > 300 || !Number.isFinite(input.episode) || input.episode < 0 || !Number.isInteger(input.season) || input.season < 1) throw new Error('invalid-request');
-        const candidates = await createSubtitleClient({ maxResponseBytes: 2 * 1024 * 1024, maxZipBytes: 4 * 1024 * 1024 }).searchSubtitles({ ...input, timeoutMs: 20000, signal: abort.signal });
-        json(res, 200, candidates.slice(0, 3).filter(c => Buffer.byteLength(c.content) <= 1024 * 1024)); return;
+        json(res, 200, await searchOnlineSubtitles(input, abort.signal)); return;
       }
       if ((path === '/api/lite/jimaku' || path === '/api/lite/jimaku/file') && req.method === 'POST') {
         const sql = await sqlite(), saved = path.endsWith('/file') ? await store.get(`jimaku:${actor.id}:${input.searchId}`) : null;

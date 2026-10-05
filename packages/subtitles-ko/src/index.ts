@@ -1,3 +1,4 @@
+import { directoryCreators, creatorHome } from "./directory.js";
 import builtInAliases from "./aliases.json" with { type: "json" };
 import { deadline, abortable, parallel, failureCode } from "./async.js";
 import { PublicHttpClient } from "./http.js";
@@ -109,7 +110,8 @@ export class SubtitleClient {
       if (this.options.enableKairan !== false && !creators.some(c => c.website.startsWith("https://kairan03.blogspot.com/"))) creators.push(this.metadata.archive(resolved));
       if (this.options.enableCsora !== false && !creators.some(c => c.website.startsWith("https://csora556.blogspot.com/"))) creators.push(this.metadata.archive(resolved, true));
       if (this.options.enableMelody !== false && !creators.some(c => c.website.startsWith("https://melody88.tistory.com/"))) creators.push(this.metadata.archive(resolved, "melody"));
-      return creators;
+      const known = new Set(creators.map(c => creatorHome(c.website)));
+      return [...creators, ...directoryCreators(resolved).filter(c => !known.has(creatorHome(c.website)))];
     } catch (error) { this.error("creators", error, scope.signal); return []; }
     finally { scope.dispose(); }
   }
@@ -132,7 +134,7 @@ export class SubtitleClient {
   async searchSubtitles(query: SubtitleQuery): Promise<SubtitleCandidate[]> {
     this.validateQuery(query);
     const normalized = normalizeTitle(query.title, query.season);
-    const cacheKey = `subtitles-ko:v3:${stableId(this.configKey, JSON.stringify(query.aliases || []), titleKey(normalized.baseTitle), normalized.season, query.episode, query.episodeOffset ?? "default")}`;
+    const cacheKey = `subtitles-ko:v4:${stableId(this.configKey, JSON.stringify(query.aliases || []), titleKey(normalized.baseTitle), normalized.season, query.episode, query.episodeOffset ?? "default")}`;
     const scope = deadline(query);
     const collected: SubtitleCandidate[] = [];
     try {
@@ -152,11 +154,16 @@ export class SubtitleClient {
         catch (error) { this.error("download", error, scope.signal); }
       });
       const creatorTask = this.metadata.creators(resolved, query.episode, scope.signal).then(async found => {
+        // A known article is distinct from its creator's archive homepage.
+        const location = (url: string) => { const parsed = new URL(url); parsed.hash = ""; return parsed.href; };
+        const known = new Set(found.map(c => location(c.website)));
+        found = [...found, ...directoryCreators(resolved).filter(c => !known.has(location(c.website)))];
         creators = found;
-        // A creator's Naver/Tistory site may contain older files absent from Blogger.
-        const pending = found.filter(c => !archives.some(a => c.website.startsWith(a.website)));
+        // Skip duplicate homepages, never an article merely sharing their prefix.
+        const pending = found.filter(c => !archives.some(a => location(c.website) === location(a.website)));
         await parallel(pending, this.concurrency, scope.signal, async creator => {
-          try { const result = await this.collector.collect(creator, query.episode, scope.signal); if (result) collected.push(result); }
+          const directOnly = archives.some(a => creatorHome(a.website) === creatorHome(creator.website));
+          try { const result = await this.collector.collect(creator, query.episode, scope.signal, false, directOnly); if (result) collected.push(result); }
           catch (error) { this.error("download", error, scope.signal); }
         });
       });

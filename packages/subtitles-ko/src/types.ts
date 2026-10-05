@@ -29,7 +29,7 @@ export interface ResolvedTitle {
   baseTitle: string;
   season: number;
   episodeOffset: number;
-  source: "alias" | "anissia" | "anilist" | "input";
+  source: "alias" | "anissia" | "anilist" | "input" | "directory";
   confidence: number;
   animeNo?: number;
 }
@@ -44,7 +44,7 @@ export interface SubtitleCreator {
   latestEpisode?: string;
   updatedAt?: string;
   isCurrentEpisode: boolean;
-  source: "anissia" | "archive";
+  source: "anissia" | "archive" | "directory";
   animeNo?: number;
   title: string;
   season: number;

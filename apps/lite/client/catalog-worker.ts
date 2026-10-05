@@ -307,13 +307,24 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
       if (parts[3] === 'online') {
         if (method === 'POST') {
           const row = db.get('SELECT * FROM lite_searches WHERE id=? AND profile=? AND episode=? AND expires>?', body.searchId, prof, id, Date.now());
-          const c = row && JSON.parse(row.payload).find((c: any) => c.id === body.candidateId); if (!c) throw new ApiFailure(409, 'subtitle-search-expired');
+          const saved = row && JSON.parse(row.payload);
+          const c = (Array.isArray(saved) ? saved : saved?.result?.candidates)?.find((c: any) => c.id === body.candidateId);
+          if (!c) throw new ApiFailure(409, 'subtitle-search-expired');
           const uuid = randomUUID(); db.run('INSERT OR IGNORE INTO online_subtitles VALUES(?,?,?,?,?,?,?,?,?)', uuid, id, c.creatorName, c.sourceUrl, c.format, c.content, hash(c.content), randomUUID(), Date.now());
           return track(c.content, c.format, { id: uuid, label: c.creatorName + ' · 한국어', lang: 'ko', source: 'online', default: true });
         }
-        const candidates = await host('api', { path: '/lite/subtitles', body: query }), searchId = randomUUID(), expiresAt = Date.now() + 300000;
-        db.run('INSERT INTO lite_searches VALUES(?,?,?,?,?)', searchId, prof, id, JSON.stringify(candidates), expiresAt);
-        return { searchId, expiresAt, query, resolvedTitle: query.title, partial: false, autoApply: !query.warnings.length, candidates: candidates.map(({ content: _content, ...c }: any) => c) };
+        const queryKey = JSON.stringify(query);
+        const previous = db.get('SELECT * FROM lite_searches WHERE profile=? AND episode=? AND expires>? ORDER BY expires DESC LIMIT 1', prof, id, Date.now());
+        const saved = previous && JSON.parse(previous.payload);
+        // Reuse complete, positive searches only. Failures and partial results remain retryable.
+        const cached = previous && saved?.queryKey === queryKey && saved.result?.candidates?.length && !saved.result.partial;
+        const response = cached ? saved.result : await host('api', { path: '/lite/subtitles', body: query });
+        // Accept a response from the previous deployment during rolling updates.
+        const result = Array.isArray(response) ? { candidates: response, partial: false, issues: [] } : response;
+        const searchId = cached ? previous.id : randomUUID(), expiresAt = cached ? previous.expires : Date.now() + 300000;
+        if (!cached) db.run('INSERT INTO lite_searches VALUES(?,?,?,?,?)', searchId, prof, id, JSON.stringify({queryKey, result}), expiresAt);
+        return { searchId, expiresAt, query, resolvedTitle: query.title, partial: result.partial, issues: result.issues,
+          autoApply: !query.warnings.length, candidates: result.candidates.map(({ content: _content, ...c }: any) => c) };
       }
       if (method === 'DELETE') { db.run('DELETE FROM online_subtitles WHERE id=? AND episode_id=?', parts[3], id); return; }
     }

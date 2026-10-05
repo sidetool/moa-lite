@@ -285,3 +285,7 @@ The Node lookup relay bundles the unmodified ByeDPI v0.17.3 Linux x86_64 binary
 from https://github.com/hufrea/byedpi under the MIT license.
 Copyright and license: `vendor/byedpi/LICENSE`. Release provenance and checksums:
 `vendor/byedpi/README.md`. This binary is not shipped to browsers.
+
+## Server-only subtitle archive decoder
+
+`libarchive-wasm@1.2.0` provides the Vercel-compatible archive decoder. Its WASM stays in the server function and is loaded only for 7z/RAR/TAR input. Wrapper and bundled-component notices, upstream build recipe snapshots and binary checksum are in `LICENSES/libarchive-wasm/`. The npm package and integrity are pinned in `pnpm-lock.yaml`.

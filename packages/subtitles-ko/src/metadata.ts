@@ -1,3 +1,4 @@
+import { directoryTitle } from "./directory.js";
 import { createHash } from "node:crypto";
 import builtInAliases from "./aliases.json" with { type: "json" };
 import { PublicHttpClient } from "./http.js";
@@ -108,6 +109,8 @@ export class MetadataClient {
       source, confidence, ...(animeNo !== undefined ? { animeNo } : {}),
     });
     if (alias) return make(alias.korean, "alias", 1);
+    const registered = directoryTitle([normalized.baseTitle, ...aliases], normalized.season);
+    if (registered) return make(registered, 'directory', .9);
     if (/[가-힣]/.test(normalized.baseTitle)) return make(normalized.baseTitle, "input", 0.8);
     const [scheduled, names] = await Promise.all([
       this.schedule(signal), this.useAniList ? this.aniListNames(normalized.baseTitle, signal) : Promise.resolve([]),

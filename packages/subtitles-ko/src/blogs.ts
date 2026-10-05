@@ -10,7 +10,7 @@ import type { AliasEntry, Diagnostic, SubtitleCandidate, SubtitleCreator } from 
 
 interface Link { url: string; label: string }
 interface PostLink { url: string; priority: number }
-const filePattern = /\.(?:ass|ssa|srt|smi|vtt|zip)(?:[?#\s]|$)/i;
+const filePattern = /\.(?:ass|ssa|srt|smi|vtt|zip|7z|rar|tar)(?:[?#\s]|$)/i;
 function absolute(href: string | undefined, base: string): string | undefined {
   if (!href) return undefined;
   try { return validatePublicUrl(new URL(href.replace(/&amp;/g, "&"), base).href).href; } catch { return undefined; }
@@ -40,7 +40,7 @@ export function publicDriveFiles(html: string, folderId: string): Link[] {
     const entries = JSON.parse(decoded)?.[0];
     if (!Array.isArray(entries)) return [];
     return entries.slice(0,1000).flatMap(item => {
-      if (!Array.isArray(item) || !/^[\w-]{10,200}$/.test(item[0]) || !Array.isArray(item[1]) || !item[1].includes(folderId) || typeof item[2] !== 'string' || !/\.(ass|ssa|srt|smi|vtt|zip)$/i.test(item[2])) return [];
+      if (!Array.isArray(item) || !/^[\w-]{10,200}$/.test(item[0]) || !Array.isArray(item[1]) || !item[1].includes(folderId) || typeof item[2] !== 'string' || !/\.(ass|ssa|srt|smi|vtt|zip|7z|rar|tar)$/i.test(item[2])) return [];
       return [{url:`https://drive.google.com/file/d/${item[0]}/view`,label:item[2]}];
     });
   } catch { return []; }
@@ -65,16 +65,28 @@ export function extractAttachmentLinks(html: string, base: string): Link[] {
   // Article body prevents sidebar/recent-post attachments from masquerading as the current post.
   const body = $(".post-body, .tt_article_useless_p_margin, .entry-content, .se-main-container, #postViewArea").first();
   const links: Link[] = [];
-  const add = (href: string | undefined, label: string) => {
+  const add = (href: string | undefined, label: string, explicit = false) => {
     const url = absolute(href, base);
     if (!url || /폰트|fonts?|\.ttf|\.otf|\.woff/i.test(label)) return;
     const parsed = new URL(url);
     const recognizedHost = parsed.hostname === "download.blog.naver.com" || parsed.hostname === "blogfiles.naver.net" || parsed.hostname.endsWith(".blogfiles.naver.net");
-    if (filePattern.test(decodeURIComponentSafe(url)) || filePattern.test(label) || googleDriveDownloadUrl(url) || googleDriveFolderId(url) || recognizedHost ||
+    if (explicit || filePattern.test(decodeURIComponentSafe(url)) || filePattern.test(label) || googleDriveDownloadUrl(url) || googleDriveFolderId(url) || recognizedHost ||
       ((parsed.hostname === "blog.kakaocdn.net" || parsed.pathname.includes("attachment")) && /자막|다운로드|download/i.test(label))) links.push({ url, label });
   };
   const anchors = body.length ? body.find("a[href]") : $("a[href]");
   anchors.each((_, element) => add($(element).attr("href"), $(element).text().trim()));
+  const buttons = body.length ? body.find('[data-file-url], [data-download-url], [data-download]') : $('[data-file-url], [data-download-url], [data-download]');
+  const protectedDownload = /data-turnstile-site-key|challenges\.cloudflare\.com\/turnstile|g-recaptcha|h-captcha/i.test(html);
+  if (!protectedDownload) buttons.each((_, element) => {
+    const node = $(element);
+    add(node.attr('data-file-url') || node.attr('data-download-url') || node.attr('data-download'), node.text().trim(), true);
+  });
+  // Parse URL string literals as data; never evaluate a page's scripts.
+  $('script').each((_, script) => {
+    for (const match of ($(script).html() || '').matchAll(/["']((?:https?:\/\/|https?%3A%2F%2F)[^"'\s<>]+)["']/gi)) {
+      add(decodeURIComponentSafe(match[1]!.replace(/\\\//g, '/')), '');
+    }
+  });
   // Naver serializes attachments in page scripts rather than visible anchors.
   for (const match of html.matchAll(/(?:"|')?(?:encodedAttachFileUrl|fileUrl|downloadUrl|attachmentUrl)(?:"|')?\s*:\s*["']([^"']+)["']/g)) {
     let value = match[1]!;
@@ -105,9 +117,9 @@ function postTitle(raw: string): string {
     .replace(/(?:제|第)?\d+(?:\s*[-~～]\s*\d+)?(?:\.\d)?\s*(?:화|話)(?=$|[^\p{L}\p{N}]|자막|字幕)/gu, " ")
     .replace(/(?:\bEP?(?:ISODE)?\s*|第|#)\d{1,4}(?:\.\d)?(?:話)?(?=$|[^\p{L}\p{N}])/giu, " ")
     .replace(/\s*(?:한글\s*)?(?:자막|字幕)\s*$/u, " ")
-    .replace(/(?:\s|^)[[(]?(?:완결|통합(?:본)?|END|완|完|미완성|수정(?:본)?|v\d+)[\])]?(?:\s|$)/gi, " ")
+    .replace(/(?:\s|^)[[(]?(?:완결|통합(?:본)?|END|완|完|終|미완성|수정(?:본)?|v\d+)[\])]?(?:\s|$)/gi, " ")
     .replace(/\s*(?:한글\s*)?(?:자막|字幕)\s*$/u, " ")
-    .replace(/\.(?:zip|ass|srt|smi|vtt)$/i, " ")
+    .replace(/\.(?:zip|7z|rar|tar|ass|srt|smi|vtt)$/i, " ")
     .replace(/[【】「」『』\[\]]/g, " ").trim();
 }
 
@@ -140,7 +152,7 @@ export class BlogCollector {
   /** Number-only/opaque filenames inherit the article identity; named files must agree. */
   private fileIdentity(raw: string, creator: SubtitleCreator): boolean | undefined {
     const name = (raw.split(/[\\/]/).at(-1) ?? raw).split("\n")[0]!.trim()
-      .replace(/\.(?:zip|ass|ssa|srt|smi|vtt)$/i, "")
+      .replace(/\.(?:zip|7z|rar|tar|ass|ssa|srt|smi|vtt)$/i, "")
       .replace(/^\[[^\]]+\]\s*(?=\S)/, "")
       .replace(/\[[^\]]*(?:\d{3,4}p|HEVC|AVC|[A-F\d]{8})[^\]]*\]|\([^)]*(?:\d{3,4}p|HEVC|WEB|BD|AAC|FLAC)[^)]*\)/gi, "")
       .replace(/^(?:ns|spon|non[- ]?spon)\s*[-_]\s*/i, "")
@@ -279,10 +291,10 @@ export class BlogCollector {
       const confirmedLink = this.episodeMatch(label, creator, episode) || seriesPage && numbers.includes(episode);
       if (!title && !this.titleMatches(label, creator)) continue;
       // A different episode article may supply a genuine series ZIP, never a conflicting single file.
-      if (pageEpisodes.length && !confirmedPost && !(numbers.length > 1 && /\.zip(?:\b|$)/i.test(label))) continue;
+      if (pageEpisodes.length && !confirmedPost && !(numbers.length > 1 && /\.(?:zip|7z|rar|tar)(?:\b|$)/i.test(label))) continue;
       // Anissia's latest post may contain a batch archive; inspect its explicit episode label.
       if (numbers.length && !confirmedLink) continue;
-      if (!confirmedPost && !confirmedLink && !(seriesPage && googleDriveDownloadUrl(link.url)) && !/\.zip(?:\b|$)|통합|전편|완결/i.test(label)) continue;
+      if (!confirmedPost && !confirmedLink && !(seriesPage && googleDriveDownloadUrl(link.url)) && !/\.(?:zip|7z|rar|tar)(?:\b|$)|통합|전편|완결/i.test(label)) continue;
       try {
         const response = await this.download(link, page.url, signal);
         const filename = responseFilename(response, label || "subtitle");
@@ -311,13 +323,30 @@ export class BlogCollector {
   }
 
   private postLinks(html: string, base: string, creator: SubtitleCreator, episode: number, allowBatch = false): PostLink[] {
+    // RSS/Atom has the same identity checks as HTML search results.
+    if (/<(?:rss|feed)[\s>]/i.test(html)) {
+      const feed = load(html, { xml: true });
+      const origin = new URL(creator.website);
+      const result: PostLink[] = [];
+      feed('item, entry').each((_, item) => {
+        const node = feed(item), title = node.find('title').first().text();
+        const href = node.find('link[rel="alternate"]').attr('href') || node.find('link').attr('href') || node.find('link').first().text();
+        const url = absolute(href, base);
+        const season = this.postSeason(title, creator);
+        if (season !== undefined && season !== creator.season) return;
+        if (url && new URL(url).hostname === origin.hostname && this.titleMatches(title, creator)
+          && (this.episodeMatch(title, creator, episode) || this.seriesPage(title, creator)))
+          result.push({ url, priority: this.episodeMatch(title, creator, episode) ? 2 : 1 });
+      });
+      return result;
+    }
     const $ = load(html);
     const links: { url: string; priority: number }[] = [];
     $("a[href]").each((_, element) => {
       const node = $(element);
       const text = node.clone();
       text.find(".cnt, .c_cnt, .count, .comment-count").remove();
-      const title = node.attr("data-tiara-copy") || text.find(".title, .post_title, .title-text, h2, h3").first().text() || text.text();
+      const title = node.attr("data-tiara-copy") || node.attr("data-tiara-name") || text.find(".title, .post_title, .title-text, h2, h3").first().text() || text.text();
       if (!this.titleMatches(title, creator) || !this.episodeMatch(title, creator, episode) && !this.seriesPage(title, creator) && !(allowBatch && this.batchPage(title, creator))) return;
       const season = this.postSeason(title, creator);
       if (season !== undefined && season !== creator.season) return;
@@ -375,7 +404,7 @@ export class BlogCollector {
     return [];
   }
 
-  async collect(creator: SubtitleCreator, episode: number, signal: AbortSignal, indexed = false): Promise<SubtitleCandidate | null> {
+  async collect(creator: SubtitleCreator, episode: number, signal: AbortSignal, indexed = false, directOnly = false): Promise<SubtitleCandidate | null> {
     // A separate budget per invocation: this collector is shared by concurrent creators.
     // Include folder listings, retry and confirmation calls as well as ordinary downloads.
     let requests = 0;
@@ -385,10 +414,10 @@ export class BlogCollector {
       requests++;
       return this.http.get(url, options);
     };
-    return new BlogCollector(http, this.options, this.report, this.index).collectBounded(creator, episode, signal, indexed);
+    return new BlogCollector(http, this.options, this.report, this.index).collectBounded(creator, episode, signal, indexed, directOnly);
   }
 
-  private async collectBounded(creator: SubtitleCreator, episode: number, signal: AbortSignal, indexed: boolean): Promise<SubtitleCandidate | null> {
+  private async collectBounded(creator: SubtitleCreator, episode: number, signal: AbortSignal, indexed: boolean, directOnly: boolean): Promise<SubtitleCandidate | null> {
     if (!creator.website || signal.aborted) return null;
     const visited = new Set<string>();
     const tryPage = async (url: string) => {
@@ -416,6 +445,9 @@ export class BlogCollector {
     }
     // An archive homepage contains many posts; do not treat the whole index as a single post.
     if (!indexed && creator.source !== "archive") { const initial = await tryPage(creator.website); if (initial) return initial; }
+    // A parallel archive lookup already searches this creator's indexes. Only
+    // inspect the known post here, retaining all identity and attachment checks.
+    if (directOnly) return null;
     let inspected = 0;
     const inspect = async (links: PostLink[]) => {
       // Rank across ALL search variants, not separately inside each result page.
@@ -462,6 +494,30 @@ export class BlogCollector {
       pages.push(...archives.filter((page): page is NonNullable<typeof page> => page !== null));
       const legacy = await inspect(pages.flatMap(page => this.postLinks(page.html, page.url, creator, episode, true)));
       if (legacy) return legacy;
+    }
+    // Recent feeds and bounded pagination cover older posts omitted from page one.
+    if (!indexed && !signal.aborted && inspected < 4 && (!pages.length || pages.some(page => page.html.trim()))) {
+      const origin = new URL(creator.website);
+      const urls: string[] = [];
+      const naver = ['blog.naver.com', 'm.blog.naver.com'].includes(origin.hostname);
+      const id = origin.searchParams.get('blogId') || origin.pathname.split('/')[1];
+      if (naver && id) urls.push(`https://rss.blog.naver.com/${encodeURIComponent(id)}.xml`);
+      else if (origin.hostname.endsWith('.tistory.com')) urls.push(`${origin.origin}/rss`);
+      if (pages.some(page => /(?:[?&](?:page|currentPage)=|class=["'][^"']*s_link)/.test(page.html)) && (naver || origin.hostname.endsWith('.tistory.com'))) {
+        for (const raw of this.searchUrls(creator, episode).slice(0, 2)) {
+          for (let page = 2; page <= (naver ? 3 : 4); page++) {
+            const url = new URL(raw); url.searchParams.set(naver ? 'currentPage' : 'page', String(page));
+            if (naver) url.searchParams.set('orderType', 'sim');
+            urls.push(url.href);
+          }
+        }
+      }
+      // Fetch at most two pages together, stopping as soon as an exact file is found.
+      for (let i = 0; i < urls.length && !signal.aborted && inspected < 4; i += 2) {
+        const extra = await readIndexes(urls.slice(i, i + 2));
+        const found = await inspect(extra.flatMap(page => page ? this.postLinks(page.html, page.url, creator, episode) : []));
+        if (found) return found;
+      }
     }
     this.report({ stage: "page", code: "not-found", creatorName: creator.name, message: "No matching public subtitle attachment found" });
     return null;

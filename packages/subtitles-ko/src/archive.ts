@@ -1,3 +1,5 @@
+import { Worker } from "node:worker_threads";
+import { createRequire } from "node:module";
 import yauzl, { type Entry, type ZipFile } from "yauzl";
 import iconv from "iconv-lite";
 import type { Readable } from "node:stream";
@@ -47,6 +49,7 @@ function rank(name: string, options: ExtractOptions): { rank: number; episode: n
 export async function extractSubtitleBuffer(input: Uint8Array, filename: string, options: ExtractOptions): Promise<ExtractedSubtitle | null> {
   const buf = Buffer.from(input);
   options.signal?.throwIfAborted();
+  if (isOtherArchive(buf)) return extractOtherArchive(buf, options);
   if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
     if (options.acceptFilename?.(filename) === false) return null;
     const score = rank(filename, options);
@@ -116,4 +119,61 @@ export async function extractSubtitleBuffer(input: Uint8Array, filename: string,
     });
     return { ...convertSubtitle(decodeSubtitleBuffer(contents)), filename: selected.name, matchedEpisode: selected.score.episode, exactEpisode: selected.score.exact };
   } finally { activeStream?.destroy(); zip.close(); }
+}
+
+function isOtherArchive(buf: Buffer) {
+  return ['377abcaf271c', '526172211a07'].some(magic => buf.subarray(0, magic.length / 2).toString('hex') === magic)
+    || buf.subarray(257, 262).toString() === 'ustar';
+}
+let activeArchives = 0;
+/** Keep the common matching rules while replacing Docker's native decoder on Vercel. */
+async function extractOtherArchive(buf: Buffer, options: ExtractOptions): Promise<ExtractedSubtitle | null> {
+  const maxBytes = options.maxZipBytes ?? 40 * 1024 * 1024;
+  if (buf.length > maxBytes) throw new Error('Archive exceeds input limit');
+  if (activeArchives >= 2) throw new Error('Archive decoder busy');
+  options.signal?.throwIfAborted();
+  activeArchives++;
+  let worker: Worker | undefined;
+  try {
+    worker = new Worker(new URL('./archive-worker.cjs', import.meta.url), {
+      workerData: { input: buf, maxBytes, maxEntries: options.maxEntries ?? 300, decoderModule: createRequire(import.meta.url).resolve("libarchive-wasm") },
+      resourceLimits: { maxOldGenerationSizeMb: 128, stackSizeMb: 4 },
+      execArgv: [],
+    });
+    const current = worker;
+    return await new Promise<ExtractedSubtitle | null>((resolve, reject) => {
+      let selected: { name: string; size: number; score: NonNullable<ReturnType<typeof rank>> } | undefined;
+      let settled = false;
+      const finish = (error?: Error, result: ExtractedSubtitle | null = null) => {
+        if (settled) return;
+        settled = true; clearTimeout(timer); options.signal?.removeEventListener('abort', abort);
+        error ? reject(error) : resolve(result);
+      };
+      const abort = () => finish(new Error('Archive decoding aborted'));
+      const timer = setTimeout(() => finish(new Error('Archive decoding timed out')), 8000);
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
+      current.on('error', error => finish(error));
+      current.on('exit', () => { if (!settled) finish(new Error('Archive decoder exited')); });
+      current.on('message', (message: { error?: string; files?: { name: string; size: number; regular: boolean }[]; contents?: Uint8Array }) => {
+        if (settled) return;
+        try {
+          if (message.error) throw new Error(message.error);
+          if (message.files) {
+            const candidates = message.files.flatMap((entry, index) => {
+              if (!entry.regular || !safeZipPath(entry.name)) return [];
+              const score = rank(entry.name, options); return score ? [{ ...entry, index, score }] : [];
+            }).sort((a,b) => b.score.rank - a.score.rank || a.name.localeCompare(b.name));
+            if (!candidates.length || candidates.length > 1 && !candidates[0]!.score.exact) { finish(); return; }
+            selected = candidates[0]!;
+            current.postMessage(candidates[0]!.index);
+          } else if (message.contents && selected) {
+            if (message.contents.byteLength !== selected.size) throw new Error('Archive member size mismatch');
+            finish(undefined, { ...convertSubtitle(decodeSubtitleBuffer(message.contents)), filename: selected.name,
+              matchedEpisode: selected.score.episode, exactEpisode: selected.score.exact });
+          } else throw new Error('Invalid archive decoder response');
+        } catch (error) { finish(error instanceof Error ? error : new Error('Archive decoding failed')); }
+      });
+    });
+  } finally { try { await worker?.terminate(); } finally { activeArchives--; } }
 }

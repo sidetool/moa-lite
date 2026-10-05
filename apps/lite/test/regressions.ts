@@ -106,6 +106,24 @@ try {
   console.log('PASS inline subtitle count:', playback.subtitles.length);
   assert.equal(playback.subtitles.length, 1);
   assert.match(await a.evaluate(async url => (await fetch(url)).text(),playback.subtitles[0].url),/inline subtitle/);
+  let subtitleRequests=0, partialSearch=false;
+  await a.route('**/api/lite/subtitles',async route=>{
+    subtitleRequests++;
+    await route.fulfill({json:{candidates:[{id:'candidate-1',creatorName:'테스트 작성자',sourceUrl:'https://example.org/post',filename:'03.vtt',format:'vtt',content:'WEBVTT\n\n00:00:00.000 --> 00:00:02.000\n검색된 자막\n',confidence:.9}],partial:partialSearch,issues:partialSearch?[{kind:'timeout'}]:[]}});
+  });
+  const subtitlePath=`/episodes/${episodeId}/subtitles/online`;
+  const firstSearch=await api(a,subtitlePath);
+  const repeated=await api(a,subtitlePath);
+  assert.equal(subtitleRequests,1);assert.equal(firstSearch.searchId,repeated.searchId);
+  assert(!('content' in repeated.candidates[0]));
+  const applied=await api(a,subtitlePath,{searchId:firstSearch.searchId,candidateId:'candidate-1'});
+  assert.match(await a.evaluate(async url=>(await fetch(url)).text(),applied.url),/검색된 자막/);
+  await api(a,subtitlePath+'?episode=2');assert.equal(subtitleRequests,2);
+  partialSearch=true;
+  const incomplete=await api(a,subtitlePath+'?episode=3');assert.equal(incomplete.partial,true);assert.equal(incomplete.issues[0].kind,'timeout');
+  await api(a,subtitlePath+'?episode=3');assert.equal(subtitleRequests,4);
+  await a.unroute('**/api/lite/subtitles');
+  console.log('PASS online subtitle diagnostics, positive query cache, partial retry and application');
   const poster=await one.request.get(origin+media.poster); console.log('PASS image headers preserved:',JSON.stringify({status:poster.status(),sent:posterHeaders.at(-1)}));assert.equal(poster.status(),200);assert.equal(posterHeaders.at(-1)?.['User-Agent'],'fixture-required');
   await sync(a);
   const beforeIdle = requests.filter(path => path === '/api/lite/sync').length;
