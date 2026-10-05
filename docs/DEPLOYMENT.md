@@ -24,7 +24,9 @@ Free 요금제가 보이지 않을 때, 또는 업데이트를 버튼 하나로 
 | --- | --- | --- |
 | A 저장 공간 | [Upstash 콘솔](https://console.upstash.com/redis)에서 **Create Database**를 누르고 요금제를 **Free**로 만듭니다. 지역은 서울이 없으면 도쿄를 고릅니다. **REST API** 항목에서 주소와 토큰을 복사합니다. | `UPSTASH_REDIS_REST_URL`(`https://`로 시작)<br>`UPSTASH_REDIS_REST_TOKEN` |
 | B Fork | [moa-lite Fork하기](https://github.com/sidetool/moa-lite/fork)에서 **Create fork**를 누릅니다. | — |
-| C 배포 | [Vercel](https://vercel.com/new)에서 B의 저장소를 **Import**하고, **Environment Variables**에 다섯 값을 넣은 뒤 **Deploy**를 누릅니다. 빌드 설정은 건드리지 않습니다. | `APP_SECRET`, `SETUP_CODE`<br>`ENABLE_EXPERIMENTAL_COREPACK=1`<br>A의 주소와 토큰 |
+| C 배포 | [Vercel](https://vercel.com/new)에서 B의 저장소를 **Import**하고, **Application Preset**을 **Other**로 바꿉니다. **Environment Variables**에 다섯 값을 넣은 뒤 **Deploy**를 누릅니다. Root Directory와 빌드 설정은 그대로 둡니다. | `APP_SECRET`, `SETUP_CODE`<br>`ENABLE_EXPERIMENTAL_COREPACK=1`<br>A의 주소와 토큰 |
+
+Vercel이 저장소 안의 `apps/server`·`apps/web`·Dockerfile을 감지해 프리셋을 **Services**로 고르고 “Multiple applications detected”, “needs a vercel.json”을 표시할 수 있습니다. moa-lite는 루트 `vercel.json` 하나로 배포하므로 **Other**로 바꾸고, 목록의 **Import single project**는 누르지 않습니다.
 
 배포 가이드의 **환경변수 한꺼번에 복사**를 누르면 다섯 값을 Vercel의 첫 **Key** 칸에 한 번에 붙여 넣을 수 있습니다.
 
@@ -49,7 +51,7 @@ node -e "console.log(require('node:crypto').randomBytes(8).toString('hex').toUpp
 | `BYEDPI_ENABLED` / `BYEDPI_STRATEGY` | 선택 | 기본 `1` / `tlsrec`. [내장 ByeDPI](#내장-byedpi-기본-켜짐) 참고 |
 | `UPSTASH_MANAGEMENT_*`, `UPSTASH_DATABASE_ID` | 선택 | 진단 메뉴의 실제 Upstash 사용량 조회. [진단 메뉴](#진단-메뉴와-실제-할당량-확인) 참고 |
 
-`vercel.json`에 설치·빌드·함수·라우팅 설정이 들어 있으므로 Vercel의 Framework Preset(Other)과 빌드 설정은 그대로 둡니다. 함수 지역은 서울(`icn1`), 최대 실행 시간은 120초, Fluid compute를 씁니다.
+`vercel.json`에 설치·빌드·함수·라우팅 설정이 들어 있으므로 Vercel의 Application/Framework Preset은 **Other**로 두고(Services로 자동 선택되면 바꿉니다) 빌드 설정은 그대로 둡니다. 함수 지역은 서울(`icn1`), 최대 실행 시간은 120초, Fluid compute를 씁니다.
 
 환경변수를 바꾼 뒤에는 **Redeploy**해야 적용됩니다. 비밀값에 `VITE_` 접두사를 붙이지 마세요(브라우저에 노출됩니다). Preview 배포에 운영 Redis를 연결하면 운영 계정을 함께 쓰므로 별도 Redis나 다른 `AUTH_NAMESPACE`·`APP_SECRET`·`SETUP_CODE`를 씁니다.
 

@@ -159,7 +159,7 @@ footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);color:v
     <p id="envStatus" class="hint" role="status"></p>
     <ol>
       <li><strong>Import Git Repository</strong> 목록에서 B단계에서 만든 저장소의 <strong>Import</strong>를 누릅니다. 목록에 없으면 <strong>Adjust GitHub App Permissions</strong>에서 그 저장소 접근을 허용합니다.</li>
-      <li><strong>Framework Preset</strong>과 <strong>Build and Output Settings</strong>는 건드리지 않습니다. 저장소의 <code>vercel.json</code>을 그대로 씁니다.</li>
+      <li><strong>Application Preset</strong>(또는 Framework Preset)을 <strong>Other</strong>로 바꿉니다. 저장소 안의 여러 폴더를 감지해 <strong>Services</strong>가 자동으로 골라지고 “Multiple applications detected”, “needs a vercel.json” 안내가 보일 수 있는데, Other로 바꾸면 사라집니다. 아래 목록의 <strong>Import single project</strong>는 누르지 않습니다. Root Directory는 <code>./</code>, 빌드 설정은 그대로 둡니다. 저장소의 <code>vercel.json</code>을 씁니다.</li>
       <li><strong>Environment Variables</strong>를 펼치고 첫 <strong>Key</strong> 칸에 복사한 내용을 붙여 넣으면 다섯 줄이 한 번에 채워집니다. 안 되면 아래 표를 보고 하나씩 넣습니다.</li>
       <li><strong>Deploy</strong>를 누르고, 끝나면 위 3단계대로 관리자 계정을 만듭니다.</li>
     </ol>
