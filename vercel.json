@@ -1,0 +1,55 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "fluid": true,
+  "installCommand": "corepack pnpm install --frozen-lockfile",
+  "buildCommand": "corepack pnpm build",
+  "outputDirectory": "apps/web/dist",
+  "regions": [
+    "icn1"
+  ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 120,
+      "includeFiles": "{vendor/byedpi/*,deploy/auth/*.{html,css,js,svg},node_modules/.pnpm/sql.js*/node_modules/sql.js/dist/sql-wasm.wasm}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/__moa/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/((?!api/|__moa/|runtime/|assets/|install/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "same-origin"
+        }
+      ]
+    },
+    {
+      "source": "/runtime/:path*",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'"
+        }
+      ]
+    }
+  ]
+}

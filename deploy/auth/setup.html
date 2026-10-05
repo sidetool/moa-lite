@@ -5,23 +5,21 @@
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#09090b">
-  <title>처음 설정 · MOA</title>
+  <title>처음 설정 · moa-lite</title>
   <link rel="icon" href="/__moa/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/__moa/login.css">
   <script src="/__moa/login.js" defer></script>
 </head>
 <body>
   <main id="setup">
-    <a class="brand" href="/" aria-label="MOA"><span>MOA</span></a>
+    <a class="brand" href="/" aria-label="moa-lite"><span>moa-lite</span></a>
     <section class="panel" aria-labelledby="title">
       <p class="eyebrow">처음 설정</p>
       <h1 id="title">관리자 계정 만들기</h1>
-      <p class="description">서버를 처음 켤 때 만들어진 설정 코드를 넣고, 이 서버를 관리할 계정을 만들어요.</p>
+      <p class="description">Vercel 환경변수 SETUP_CODE에 저장한 코드를 넣고, moa-lite를 관리할 계정을 만들어요.</p>
       <details class="where">
         <summary>설정 코드는 어디서 보나요?</summary>
-        <p>서버가 켜질 때 로그에 표시돼요. 아래 명령으로 다시 볼 수 있어요.</p>
-        <code>docker compose exec moa-auth moa-setup-code</code>
-        <p>Docker Desktop에서는 <b>moa-auth</b> 컨테이너의 Logs 탭에서도 볼 수 있어요.</p>
+        <p>배포 가이드에서 만들고 파일로 보관한 코드예요. Vercel 프로젝트의 <b>Settings → Environment Variables</b>에서 <b>SETUP_CODE</b> 값을 열어 확인할 수도 있어요.</p>
       </details>
       <p id="setup-error" class="error" role="alert" data-error="{{ERROR_CODE}}">{{ERROR}}</p>
       <form id="setup-form" method="post" action="/__moa/setup" class="setup-form join">

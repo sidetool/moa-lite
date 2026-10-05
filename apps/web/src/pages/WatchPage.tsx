@@ -58,7 +58,7 @@ function useSession(episodeId: string, startOverride: number | null) {
       created = result;
       if (cancelled) await retirePlayback(result.sessionId, result.runtimeDependent);
       else setSession(result);
-    }).catch(e => { if (!cancelled) setError(e instanceof ApiError && e.code === "kids-restricted" ? KIDS_RESTRICTED : e instanceof ApiError && e.code === "apk_playback_capacity" ? "다른 기기에서 재생 중입니다. 재생이 끝난 뒤 다시 시도해 주세요." : "재생을 준비하지 못했습니다."); });
+    }).catch(e => { if (!cancelled) setError(e instanceof ApiError && e.code === "kids-restricted" ? KIDS_RESTRICTED : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'source_browser_unavailable' ? '이 소스는 WebView 실행이 필요해 moa-lite에서 지원하지 않아요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'unsupported-video-format' ? '이 영상 형식은 브라우저에서 직접 재생할 수 없어요. 다른 재생 서버를 선택해 주세요.' : e instanceof ApiError && e.code === "apk_playback_capacity" ? "다른 기기에서 재생 중입니다. 재생이 끝난 뒤 다시 시도해 주세요." : "재생을 준비하지 못했습니다."); });
     return () => {
       cancelled = true;
       if (created) void retirePlayback(created.sessionId, created.runtimeDependent);

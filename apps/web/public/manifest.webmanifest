@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "MOA",
-  "short_name": "MOA",
+  "name": "moa-lite",
+  "short_name": "moa-lite",
   "description": "영상 전용 개인 스트리밍",
   "lang": "ko-KR",
   "start_url": "/",

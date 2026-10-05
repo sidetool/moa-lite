@@ -1,3 +1,4 @@
+import { subtitleVtt, remoteMediaType } from './remote-media.js';
 import { APK_RELAY } from './apk-bridge.js';
 import { playbackMediaType } from './tmdb.js';
 import { parseEdl, edlPlaylist, edlMaster } from './edl.js';
@@ -14,14 +15,6 @@ import { ApiFailure } from './util.js';
 const token = () => randomBytes(24).toString('base64url');
 interface Asset { url: string; headers: Record<string,string>; subtitle?: 'ass' | 'vtt'; playlist?: string; subtitleText?: string }
 interface RemoteSession { leaseLost?: boolean; renewAt?: number; renewing?: boolean; renewFailures?: number; apkLease?: string; proxy?: string; profile: string; touched: number; assets: Map<string,Asset>; reverse: Map<string,string>; abort: AbortController; response: PlaybackSession }
-/** Parse cue boundaries even when an extension removes blank lines while decrypting SRT. */
-function subtitleVtt(text: string) {
-  const body=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').trimStart();
-  if(/^WEBVTT(?:\s|$)/.test(body))return body;
-  const cues=[...body.matchAll(/^(?:\d+[ \t]*\n)?[ \t]*(\d{2}:\d{2}:\d{2}[,.]\d{3}[ \t]+-->[ \t]+\d{2}:\d{2}:\d{2}[,.]\d{3})[^\n]*\n/gm)];
-  if(!cues.length)throw new ApiFailure(502,'unsupported-subtitle-format');
-  return 'WEBVTT\n\n'+cues.map((cue,i)=>cue[1].replace(/,/g,'.')+'\n'+body.slice(cue.index!+cue[0].length,cues[i+1]?.index).trim()+'\n').join('\n');
-}
 /** Rewrite every HLS URI (segments, variants, keys, maps, subtitles, low-latency parts). */
 export function rewritePlaylist(body: string, base: string, map: (url: string) => string) {
   if (!body.trimStart().startsWith('#EXTM3U')) throw new ApiFailure(502, 'invalid-playlist');
@@ -107,7 +100,7 @@ export class RemotePlayback {
     const live = Boolean(source.live), id = token();
     const state: RemoteSession = { apkLease: videos.apkLease, proxy: this.sources.proxy(), profile, touched: this.clock(), renewAt: this.clock()+45_000, assets: new Map(), reverse: new Map(), abort: new AbortController(), response: {} as PlaybackSession };
     const headers = item.headers || {};
-    const mime = item.url.startsWith('edl://') ? 'application/vnd.apple.mpegurl' : /\.mp4(?:\?|$)/i.test(item.url) ? 'video/mp4' : /\.webm(?:\?|$)/i.test(item.url) ? 'video/webm' : 'application/vnd.apple.mpegurl';
+    const mime = remoteMediaType(item.url);
     let inlineBytes=0;
     const subtitles: SubtitleTrack[] = (item.subtitles || []).slice(0,32).flatMap((track,i) => {
       if (typeof track?.file !== 'string' || !track.file) return [];

@@ -1,6 +1,11 @@
-MOA
+moa-lite
 
-MOA-authored code is licensed under GPL-3.0-or-later; see LICENSE.
+moa-lite is a fork of MOA (https://github.com/sidetool/moa).
+MOA-authored and moa-lite-authored code is licensed under GPL-3.0-or-later;
+see LICENSE.
+
+ByeDPI v0.17.3 (vendor/byedpi), MIT; see vendor/byedpi/LICENSE.
+
 Third-party material keeps its original license and copyright.
 
 Suwayomi Server v2.3.2243 selected sources: MPL-2.0 and Apache-2.0.

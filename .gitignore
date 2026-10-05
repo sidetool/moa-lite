@@ -32,3 +32,8 @@ blob-report/
 /.audit/
 /apps/server/scripts/.audit-before.ts
 **/__pycache__/
+
+.state/
+.vercel/
+apps/web/public/runtime/
+apps/web/public/install/

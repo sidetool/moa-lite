@@ -1,3 +1,11 @@
+# moa-lite 출처와 라이선스
+
+MOA UI·카탈로그·작품 묶기·시즌·TMDB·인증·자막·번역 코드는 [sidetool/moa](https://github.com/sidetool/moa), 커밋 `a7ff835e76b9769432f00dcadaad788993464c92`에서 가져왔다. 원본 Git 이력과 [GPL-3.0 라이선스](LICENSE)를 유지한다. moa-lite의 추가 코드는 GPL-3.0-or-later이다.
+
+React, hls.js, JASSUB, sql.js, QuickJS/WASM, linkedom, noble, buffer 등 기존/추가 의존성은 각 패키지의 라이선스를 따른다. Worker 배포 의존성의 라이선스 전문은 빌드 시 `/runtime/THIRD_PARTY_LICENSES.txt`에 함께 배포한다. TMDB의 기존 공식 이미지와 크레딧을 유지한다.
+
+---
+
 # Third-party notices
 
 MOA-authored code is GPL-3.0-or-later. Reused code and dependencies retain their original licenses; the root grant does not relicense them, external data, or user-installed extensions. License texts and original copyright notices are under [LICENSES](LICENSES/). This inventory describes the pinned dependency snapshot; it is not a claim that every future platform or binary is cleared for redistribution.
@@ -271,3 +279,9 @@ Pinned coordinates and hashes are in `services/aniyomi-worker/pom.xml` and `depe
 TMDB/AniList/AniSkip/Anissia/Jimaku responses, user media, subtitles and translations are external data and not covered by MOA's code license. Redistribution permissions are **UNKNOWN** unless separately obtained. Use synthetic fixtures.
 
 Publish each binary with the full applicable notices and its exact Corresponding Source, modifications and build instructions. Include GPL browser code, MPL modified files, LGPL WASM/native source and required replacement/relink material. A link to an unpinned upstream repository or this inventory alone does not fulfill those obligations. The **UNKNOWN** items above are owner action items, not assertions of permission.
+# ByeDPI
+
+The Node lookup relay bundles the unmodified ByeDPI v0.17.3 Linux x86_64 binary
+from https://github.com/hufrea/byedpi under the MIT license.
+Copyright and license: `vendor/byedpi/LICENSE`. Release provenance and checksums:
+`vendor/byedpi/README.md`. This binary is not shipped to browsers.

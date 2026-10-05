@@ -181,7 +181,7 @@ async function compatibilityRequest(
             url,
             {
               method,
-              headers,
+              headers: { ...headers, ...(body === undefined ? {} : { 'content-length': String(Buffer.byteLength(body)) }) },
               signal: deadline,
               agent: pinnedProxyAgent(outboundProxy, url, address.address, deadline) ?? false,
               // A synchronous lookup can fail inside TLS construction before listeners exist.

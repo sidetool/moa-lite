@@ -1,0 +1,29 @@
+name: moa-lite verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lite-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm build
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm test
+      - run: corepack pnpm --filter @moa/lite exec playwright-core install --with-deps chromium
+      - run: corepack pnpm test:browser
+      - run: corepack pnpm verify:vercel

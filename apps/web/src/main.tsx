@@ -1,4 +1,5 @@
 import { AboutPage } from './pages/AboutPage';
+import { DiagnosticsPage } from './pages/DiagnosticsPage';
 import { RemoteAccessPage } from './pages/RemoteAccessPage';
 import { installPlaybackFullscreen } from "./lib/playback-fullscreen";
 import { installRemoteNavigation } from "./lib/remote";
@@ -34,6 +35,7 @@ const queryClient = new QueryClient({
     queries: { staleTime: 30_000, gcTime: 10 * 60_000, retry: (count, error) => count < 1 && !(error instanceof ApiError && error.status < 500), refetchOnWindowFocus: false }
   }
 });
+if (import.meta.env.VITE_MOA_LITE === '1') window.addEventListener('moa-lite:changed', () => { void queryClient.invalidateQueries(); });
 
 /** Every app route needs a chosen profile; the server also enforces it. */
 function RequireProfile({ children }: { children: ReactNode }) {
@@ -69,8 +71,8 @@ const router = createBrowserRouter([
       { path: "/movies", element: <Navigate to="/tabs/movies" replace /> },
       { path: "/anime", element: <Navigate to="/tabs/anime" replace /> },
       { path: "/tabs/:tabId", element: <HomePage /> },
-      { path: "/local", element: <HomePage localOnly /> },
-      { path: "/local/genre/:genre", element: <GenreRoute /> },
+      { path: "/local", element: import.meta.env.VITE_MOA_LITE === '1' ? <Navigate to="/" replace /> : <HomePage localOnly /> },
+      { path: "/local/genre/:genre", element: import.meta.env.VITE_MOA_LITE === '1' ? <Navigate to="/" replace /> : <GenreRoute /> },
       { path: "/series/genre/:genre", element: <GenreRoute type="series" /> },
       { path: "/movies/genre/:genre", element: <GenreRoute type="movie" /> },
       { path: "/anime/genre/:genre", element: <GenreRoute type="anime" /> },
@@ -80,17 +82,23 @@ const router = createBrowserRouter([
       { path: "/history", element: <HistoryPage /> },
       { path: "/sources", element: <RequireAdmin><SourcesPage /></RequireAdmin> },
       { path: "/sources/:id", element: <SourceBrowsePage /> },
-      { path: "/library", element: <RequireAdmin><LibraryPage /></RequireAdmin> },
-      { path: "/remote-access", element: <RequireAdmin><RemoteAccessPage /></RequireAdmin> },
+      { path: "/library", element: import.meta.env.VITE_MOA_LITE === '1' ? <Navigate to="/" replace /> : <RequireAdmin><LibraryPage /></RequireAdmin> },
+      { path: "/remote-access", element: import.meta.env.VITE_MOA_LITE === '1' ? <Navigate to="/" replace /> : <RequireAdmin><RemoteAccessPage /></RequireAdmin> },
       { path: "/accounts", element: <AccountsPage /> },
       { path: "/about", element: <AboutPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "/settings/tabs", element: <SettingsPage /> },
+      { path: "/settings/diagnostics", element: import.meta.env.VITE_MOA_LITE === '1' ? <RequireAdmin><DiagnosticsPage /></RequireAdmin> : <Navigate to="/settings" replace /> },
       { path: "/me", element: <MePage /> },
       { path: "*", element: <Navigate to="/" replace /> }
     ]
   }
 ]);
+if (import.meta.env.VITE_MOA_LITE === '1') {
+  const { cancelPendingReads } = await import('../../lite/client/index');
+  let locationKey = router.state.location.key;
+  router.subscribe(state => { if (state.location.key !== locationKey) { locationKey = state.location.key; cancelPendingReads(); } });
+}
 
 const disposeRemote = installRemoteNavigation(router);
 const disposeFullscreen = installPlaybackFullscreen(router);

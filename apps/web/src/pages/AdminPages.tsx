@@ -205,7 +205,7 @@ export function SettingsPage() {
           {row("다음 화 자동 재생", "에피소드가 끝나면 다음 화를 이어서 재생합니다.", <Toggle label="다음 화 자동 재생" checked={s.autoplayNext} onChange={value => void save({ autoplayNext: value })} />)}
           {s.autoplayNext && row("자동 재생 대기 시간", "다음 화 카드가 나온 뒤 재생까지 기다리는 시간", select("autoplayDelay", [[3, "3초"], [5, "5초"], [10, "10초"], [15, "15초"]]))}
           {row("기본 화질", "네트워크가 느리면 낮은 화질이 끊김이 적어요.", select("preferredQuality", [["auto", "자동"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"]]))}
-          {row("하드웨어 변환", "브라우저가 재생할 수 없는 영상을 서버 GPU로 변환합니다.", <Toggle label="하드웨어 변환" checked={s.hardwareTranscoding} onChange={value => void save({ hardwareTranscoding: value })} />)}
+          {import.meta.env.VITE_MOA_LITE !== "1" && row("하드웨어 변환", "브라우저가 재생할 수 없는 영상을 서버 GPU로 변환합니다.", <Toggle label="하드웨어 변환" checked={s.hardwareTranscoding} onChange={value => void save({ hardwareTranscoding: value })} />)}
         </div>
       </section>
       <section className="settings-group">
@@ -236,14 +236,15 @@ export function SettingsPage() {
         <h2>소스와 라이브러리</h2>
         <div className="settings-card">
           {link("/sources", <Tv size={20} />, "영상 소스", "확장 저장소, 소스 설치·업데이트·설정")}
-          {link("/library", <FolderOpen size={20} />, "로컬 라이브러리", "영상 폴더 추가와 스캔")}
+          {import.meta.env.VITE_MOA_LITE !== "1" && link("/library", <FolderOpen size={20} />, "로컬 라이브러리", "영상 폴더 추가와 스캔")}
           <TmdbSettings />
-          {link("/remote-access", <Globe size={20} />, "원격 접속", "집 밖에서도 MOA 열기 · 주소와 QR")}
+          {import.meta.env.VITE_MOA_LITE !== "1" && link("/remote-access", <Globe size={20} />, "원격 접속", "집 밖에서도 MOA 열기 · 주소와 QR")}
         </div>
         <p className="settings-hint">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
       </section>
       <TranslationSettings />
-      <NetworkSettings /></>}
+      {import.meta.env.VITE_MOA_LITE === "1" && <section className="settings-group"><h2>운영</h2><div className="settings-card">{link("/settings/diagnostics", <Info size={20} />, "진단 · 할당량", "무료 한도, 서버 요청·오류와 CPU 참고 측정")}</div></section>}
+      {import.meta.env.VITE_MOA_LITE !== "1" && <NetworkSettings />}</>}
     </div>
   );
 }

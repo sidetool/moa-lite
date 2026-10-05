@@ -123,7 +123,7 @@ export class Tmdb {
     this.reload();
     if (options.fetch) this.fetcher = options.fetch;
   }
-  private fetcher: typeof fetch = (...args) => fetch(...args);
+  private fetcher: typeof fetch = (input, init) => fetch(input, init);
   private async slot() {
     if (this.active >= 6) await new Promise<void>(resolve => this.waiting.push(resolve));
     this.active++;

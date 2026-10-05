@@ -38,7 +38,8 @@ export type FatalHandler = (message: string) => void;
 /** Attach a playback session to a <video>. hls.js is loaded only when needed. */
 export async function attach(video: HTMLVideoElement, session: PlaybackSession, start: number, onFatal: FatalHandler): Promise<EngineHandle> {
   const isHls = session.mime === "application/vnd.apple.mpegurl" || /\.m3u8(\?|$)/.test(session.url);
-  const nativeError = () => onFatal("영상 데이터를 재생하지 못했습니다.");
+  const connectionHint = import.meta.env.VITE_MOA_LITE === '1' ? ' PC에서는 연결 확장에 영상 사이트 권한을 허용해 주세요. 모바일에서는 직접 재생을 허용하는 소스가 필요해요.' : '';
+  const nativeError = () => onFatal("영상 데이터를 재생하지 못했습니다." + connectionHint);
   const noop: EngineHandle = { destroy() { video.removeEventListener("error",nativeError); video.removeAttribute("src"); video.load(); }, levels: () => [], setLevel() {} };
 
   if (!isHls || (!(await hlsSupported()) && video.canPlayType("application/vnd.apple.mpegurl"))) {
@@ -60,7 +61,7 @@ export async function attach(video: HTMLVideoElement, session: PlaybackSession, 
   hls.on(HlsClass.Events.ERROR, (_event, data) => {
     if (!data.fatal) return;
     if (data.type === HlsClass.ErrorTypes.MEDIA_ERROR && mediaRecoveries < 2) { mediaRecoveries++; hls.recoverMediaError(); return; }
-    if (data.type === HlsClass.ErrorTypes.NETWORK_ERROR) onFatal("영상 서버에 연결하지 못했습니다.");
+    if (data.type === HlsClass.ErrorTypes.NETWORK_ERROR) onFatal("영상 서버에 연결하지 못했습니다." + connectionHint);
     else onFatal("이 영상을 재생하지 못했습니다.");
   });
   hls.loadSource(session.url);

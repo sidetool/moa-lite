@@ -110,7 +110,7 @@ function ProfileMenu({ profile }: { profile?: Profile }) {
           <div className="menu-head"><Avatar profile={profile} size={36} /><b>{profile?.name}</b></div>
           {item("/history", <History size={18} />, "시청 기록")}
           {admin && item("/sources", <FolderOpen size={18} />, "영상 소스")}
-          {admin && item("/library", <FolderOpen size={18} />, "라이브러리 관리")}
+          {admin && import.meta.env.VITE_MOA_LITE !== "1" && item("/library", <FolderOpen size={18} />, "라이브러리 관리")}
           {admin && hasLoginGate && item("/accounts", <Users size={18} />, "계정과 초대")}
           {item("/settings", <Settings size={18} />, "설정")}
           {item("/about", <Info size={18} />, "정보/크레딧")}

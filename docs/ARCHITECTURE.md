@@ -1,21 +1,43 @@
-# 구조
+# moa-lite 구현 구조
 
-MOA는 로컬 미디어와 사용자가 설치한 확장을 하나의 카탈로그와 플레이어로 연결한다.
+`apps/web`은 기존 MOA UI입니다. 이름·지원하지 않는 메뉴 숨김·안내 문구와 API 어댑터 연결만 변경합니다. CSS·이미지·플레이어 컴포넌트를 유지합니다. `apps/server`의 카탈로그·SQL·작품 묶기·시즌·TMDB·자막 코드를 `apps/lite`가 재사용합니다.
 
-| 구성 | 역할 |
+| 위치 (`apps/lite` 기준) | 역할 |
 | --- | --- |
-| `apps/web` | React UI, 기기별 설정, HLS/native 재생, ASS/VTT 자막, 리모컨 탐색 |
-| `apps/server` | Fastify API, SQLite, 미디어 스캔, FFmpeg 세션, 메타데이터·이미지 캐시 |
-| `packages/shared` | 클라이언트와 서버의 API 타입 |
-| `packages/extensions` | Mangayomi 형식 JS 호환 실행, HTTP 제한·프록시 |
-| `services/aniyomi-worker` | 선택 Aniyomi APK JVM 실행기와 Chromium 브리지 |
-| `packages/subtitles-ko`, `packages/skip-markers` | 자막 검색·변환, 외부 마커 조회와 로컬 반복 구간 분석 |
-| `deploy/auth`, `deploy/gateway` | 계정·세션 인증, 신뢰하는 계정 헤더를 앱에 전달 |
+| `client/index.ts` | 기존 API 어댑터, 계정별 저장·동기화·취소·번역 배치 |
+| `client/catalog-worker.ts` | sql.js 기반 MOA Store와 기존 도메인 코드·응답 타입 |
+| `client/source-worker.js` | QuickJS/WASM의 MOA Mangayomi bootstrap·dispatch |
+| `client/storage.ts` | 계정별 IndexedDB, Web Locks와 IDB 임대 잠금 대체 경로 |
+| `connector/` | PC 연결 확장과 재생 탭 임시 규칙 |
+| `server/app.ts` | 인증·권한·짧은 외부 API 요청을 처리하는 서버리스 라우터 |
+| `server/auth.ts` | MOA 인증 SQL·HTML과 Redis CAS 저장 |
+| `server/documents.ts` | Upstash REST·원자적 revision CAS·분산 요청 제한 |
+| `server/sync.ts` | MOA 테이블 검증·계정 권한·참조·삭제 연쇄 처리 |
 
-미디어는 읽기 전용 `/media` 아래에 마운트한다. 앱 DB, 설치한 확장, 자막, 번역과 캐시는 `/data`에 저장한다. 인증 DB와 APK worker 데이터는 별도 저장소다. 시청 기록·설정은 프로필 단위이고 카탈로그·메타데이터 캐시는 공유한다.
+루트의 `api/index.ts`와 `vercel.json`이 함수 및 정적 파일·로그인·SPA 라우팅을 연결합니다.
 
-로컬 재생은 브라우저 capability에 따라 직접 재생, remux 또는 transcode를 선택한다. 원격 재생은 서버가 발급한 세션 URL로 중계한다. 임의 외부 URL을 받는 공개 프록시를 제공하지 않는다. 세션 자산 URL은 접근 토큰이므로 공개하지 않는다.
+## 실행과 취소
 
-확장은 신뢰 경계 밖의 실행 코드다. JS에는 프로세스/QuickJS 격리와 네트워크 제한이 있고 APK에는 별도 컨테이너·자원 제한이 있다. APK가 일반 JVM 코드를 실행한다는 점은 변하지 않는다. 전체 Android 앱이나 모든 확장 ABI의 호환성을 보장하지 않는다.
+확장은 QuickJS에서 실행합니다. 메모리는 64MiB, 스택은 512KiB, 일반 실행은 30초·영상 추출은 60초, HTTP 호출은 작업당 240회·총 32MiB로 제한합니다. 개별 조회 본문은 2MiB입니다. CPU interrupt와 Worker 종료를 함께 사용하고 취소 시 HTTP도 종료합니다. 화면 이동 시 읽기 작업을 취소하며 쓰기·동기화는 계정 잠금 안에서 직렬화합니다.
 
-TMDB, AniList, AniSkip, Anissia, Jimaku와 선택 Gemini 번역은 외부 API를 사용할 수 있다. 요청한 제목·식별자·자막이 외부로 전송될 수 있다. [자막과 스킵](SUBTITLES-AND-SKIP.md), [확장](EXTENSIONS.md), [보안](../SECURITY.md)을 참고한다.
+카탈로그 Worker는 원본 SQLite 쿼리와 Store 인터페이스를 sql.js에 연결합니다. SQL 바이트와 동기화 상태를 계정별 IndexedDB에 저장합니다. 요청마다 고유 스냅샷 표식을 전달해 같은 Worker DB를 유지하고, 응답 이후 완료된 캐시 갱신은 별도 체크포인트로 저장합니다. 다른 탭의 스냅샷을 받아야 할 때는 변경 전 행과 비교하여 충돌하지 않는 캐시 행만 병합합니다. 프로필은 요청 시작 시 고정하며 번역 작업에도 같은 프로필을 전달합니다. Node 파일·프로세스·APK 기능은 브라우저 어댑터에서 제외합니다. Worker와 WASM은 `/runtime/` 아래 빌드합니다.
+
+## 동기화
+
+프로필·설정·시청 진행·볼 목록·작품 묶기·수동 TMDB 연결과 필요한 작품·회차 참조를 저장합니다. 최소 참조를 받아도 기존 기기의 전체 상세 캐시는 유지합니다. 새 기기는 필요할 때 원본 상세를 다시 조회합니다. 공통 소스 설치·설정·기본 내비게이션은 관리자 데이터입니다.
+
+행의 `base`와 서버 revision이 다르면 서버 값을 적용합니다. 삭제는 tombstone으로 남기고 프로필·작품·회차가 삭제되면 하위 행도 revision을 증가시키며 삭제합니다. 서버가 실제 세션의 계정·권한을 확인합니다. 통신 실패 시 로컬 변경이 남아 다음 동기화에서 재시도됩니다.
+
+동기화 요청에 클라이언트의 `sharedRevision`을 함께 보내고 서버는 공통 소스가 바뀐 경우에만 같은 응답에 포함합니다. 계정 잠금과 IndexedDB `syncedAt`으로 최근의 빈 동기화를 탭 간 합치며 쓰기 대기열은 그대로 보관합니다. 자동 요청 실패는 최대 5분까지 지수 백오프합니다.
+
+BroadcastChannel로 탭에 변경·계정 전환·로그아웃을 알립니다. Web Locks를 사용할 수 없는 환경은 IndexedDB 트랜잭션 기반 임대 잠금을 사용하고 저장 시 소유자를 다시 검사합니다. 번역은 작업별 잠금으로 중복 배치를 방지합니다. 로그아웃·계정 변경 시 Worker·HTTP·번역·Blob·임시 규칙을 정리합니다.
+
+## 서버와 영상
+
+인증 SQL 스냅샷은 Redis에서 CAS로 읽고 저장합니다. 영속 파일·상주 작업·백그라운드 번역을 사용하지 않습니다. API 키는 AES-GCM 암호문으로 저장하고 원문을 반환하지 않습니다. 외부 조회는 원본 DNS 고정·사설 주소 차단·리다이렉트 검증을 재사용합니다. 연결 확장은 선택 사항이며 기본 경로는 Vercel 조회 중계입니다. 이미지 요청은 URL과 전체 소스 헤더를 계정에 묶인 암호화 티켓으로 전달하고, 영상 요청은 중계하지 않습니다.
+
+Redis 문서 저장소는 큰 값을 gzip으로 압축하고 기존 비압축 문서도 읽습니다. 인스턴스 캐시가 있을 때 Redis Lua GET과 내용 지문 비교로 변경을 확인하여 같은 문서의 재전송을 생략합니다. Redis 오류 시 캐시 인증으로 대체하지 않습니다. 인증 세션 인덱스는 원본 스냅샷이 바뀔 때 재생성하며 만료는 매번 검사합니다. 이미지 티켓은 계정별 기기 저장소에서 제한된 수만 재사용해 기존 private HTTP 캐시가 새로고침 후에도 적중하도록 합니다.
+
+소스 조회 중계는 기본적으로 내장 ByeDPI v0.17.3을 거칩니다. Linux x64 정적 실행 파일을 함수에 포함하고 요청마다 `127.0.0.1`의 임시 SOCKS5 포트에서 실행합니다. 서버가 검증한 목적지 IP만 SOCKS에 전달하고 SNI·인증서 검증은 원래 호스트를 사용합니다. 기본 전략은 TLS 레코드 분할이며, 완료·오류·취소 시 자식 프로세스 종료를 기다립니다. 프록시의 DNS 해석과 UDP는 끕니다. 실행 실패 시 직접 요청으로 우회하지 않습니다. TMDB/Gemini 등 별도 서비스 API와 브라우저의 실제 영상 전송은 이 프록시 대상이 아닙니다.
+
+`PlaybackSession`은 기존 필드에 선택적 `transport`·`headers`를 추가합니다. MP4·HLS·세그먼트는 직접 재생하며 기존 hls.js·네이티브·JASSUB UI를 사용합니다. 자막은 기기 Blob URL로 제공하고 번역 체크포인트는 기기에 저장합니다. 번역 배치 진행은 브라우저가 담당합니다.

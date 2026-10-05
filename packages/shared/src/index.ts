@@ -260,6 +260,9 @@ export interface OnlineSubtitleSearch {
 export interface AudioTrack { id: string; label: string; lang?: string; default?: boolean }
 
 export interface PlaybackSession {
+  /** moa-lite fetches media directly; a connector may apply temporary tab rules. */
+  transport?: 'direct' | 'connector';
+  headers?: Record<string, string>;
   /** APK process must stay alive; client sends heartbeats while paused and can recreate an expired session once. */
   runtimeDependent?: boolean;
   sessionId: string;

@@ -7,8 +7,8 @@
   <meta name="theme-color" content="#09090b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="MOA">
-  <title>로그인 · MOA</title>
+  <meta name="apple-mobile-web-app-title" content="moa-lite">
+  <title>로그인 · moa-lite</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/__moa/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/__moa/login.css">
@@ -16,7 +16,7 @@
 </head>
 <body>
   <main>
-    <a class="brand" href="/" aria-label="MOA 홈"><span>MOA</span></a>
+    <a class="brand" href="/" aria-label="moa-lite 홈"><span>moa-lite</span></a>
     <section class="panel" aria-labelledby="title">
       <h1 id="title">{{TITLE}}</h1>
       <p class="description">{{DESCRIPTION}}</p>
@@ -38,7 +38,7 @@
       </form>
       <div class="account" {{ACCOUNT_HIDDEN}}>
         <p><strong>{{USERNAME}}</strong> 계정으로 로그인되어 있습니다.</p>
-        <a class="submit" href="/">MOA 열기</a>
+        <a class="submit" href="/">moa-lite 열기</a>
         <form method="post" action="/__moa/logout">
           <input type="hidden" name="csrf" value="{{CSRF}}">
           <button class="logout" type="submit">이 브라우저에서 로그아웃</button>

@@ -123,13 +123,13 @@ function TabEditor({ tab, isNew, isHome, sources, onSave, onDelete, onClose }: {
                 {on && advanced === source.id && <div className="pick-filters"><TabSourceFilters id={source.id} value={draft.sourceFilters?.[source.id]} onChange={v => setFilter(source.id, v)} /></div>}
               </li>;
             })}
-            <li className={cx(draft.includeLocal && 'is-on')}>
+            {import.meta.env.VITE_MOA_LITE !== "1" && <li className={cx(draft.includeLocal && 'is-on')}>
               <button type="button" className={cx('pick', draft.includeLocal && 'is-on')} aria-pressed={draft.includeLocal} onClick={() => setDraft(d => ({ ...d, includeLocal: !d.includeLocal }))}>
                 <span className="pick-icon"><FolderOpen size={18} /></span>
                 <span className="pick-body"><b>로컬 라이브러리</b><small>내 서버의 영상 폴더</small></span>
                 <span className="pick-check">{draft.includeLocal && <Check size={16} />}</span>
               </button>
-            </li>
+            </li>}
           </ul>
           {!usable.length && <p className="settings-hint">설치한 소스가 없어요. {admin ? <ButtonLink to="/sources" size="m">소스 설치</ButtonLink> : '관리자에게 소스 설치를 부탁해 주세요.'}</p>}
         </div>

@@ -12,6 +12,11 @@ export function setCurrentProfileId(id: string | null) {
   try {
     if (id) localStorage.setItem(PROFILE_KEY, id);
     else localStorage.removeItem(PROFILE_KEY);
+    const account = localStorage.getItem('moa-lite.account');
+    if (account) {
+      if (id) localStorage.setItem(`moa-lite.profile.${account}`, id);
+      else localStorage.removeItem(`moa-lite.profile.${account}`);
+    }
   } catch { /* private mode */ }
 }
 
@@ -35,7 +40,12 @@ async function request<T>(path: string, init: ApiInit, auth: boolean): Promise<T
   if (auth) headers['X-Moa-Request'] = '1';
   const body = init.body ?? (auth && mutation ? {} : undefined);
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const response = await fetch(path, {
+  if (import.meta.env.VITE_MOA_LITE === '1' && auth && path.endsWith('/logout')) {
+    await (await import('../../../lite/client/index')).beforeLogout();
+  }
+  const transport = import.meta.env.VITE_MOA_LITE === '1' && !auth
+    ? (await import('../../../lite/client/index')).liteFetch : fetch;
+  const response = await transport(path, {
     method: init.method ?? "GET",
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,6 +53,7 @@ async function request<T>(path: string, init: ApiInit, auth: boolean): Promise<T
     keepalive: init.keepalive,
     credentials: "same-origin"
   });
+  if (import.meta.env.VITE_MOA_LITE === '1' && auth && path.endsWith('/logout') && response.ok) (await import('../../../lite/client/index')).afterLogout();
   if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

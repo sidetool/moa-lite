@@ -11,7 +11,7 @@ export function defaultTabs(sources: VideoSource[]): NavigationTab[] {
     { id: 'movies', name: '영화', sourceIds: ids(s => !s.live && s.type !== 'anime'), includeLocal: false },
     { id: 'anime', name: '애니', sourceIds: ids(s => s.type === 'anime'), includeLocal: false },
     { id: 'series', name: '시리즈', sourceIds: ids(s => !s.live && s.type !== 'anime'), includeLocal: false },
-    { id: 'local', name: '로컬 라이브러리', sourceIds: [], includeLocal: true }
+    ...(import.meta.env.VITE_MOA_LITE === '1' ? [] : [{ id: 'local', name: '로컬 라이브러리', sourceIds: [], includeLocal: true }])
   ];
 }
 export function useNavigation() {

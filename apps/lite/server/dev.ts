@@ -1,0 +1,11 @@
+import { createServer } from 'node:http';
+import { createLiteApplication } from './app.js';
+import { createServer as viteServer } from '../../../apps/web/node_modules/vite/dist/node/index.js';
+const origin = process.env.APP_URL ?? 'http://127.0.0.1:5180';
+if (!process.env.UPSTASH_REDIS_REST_URL) console.info('Local development uses memory storage; restarting clears accounts and cloud state.');
+const app = createLiteApplication({ dev: true, origin, secret: process.env.APP_SECRET ?? 'moa-lite-local-development-secret-only', setupCode: process.env.SETUP_CODE ?? 'LITE-LOCA-LSET-UP01' });
+const api = createServer(app.handle); api.listen(5181, '127.0.0.1');
+process.env.VITE_MOA_LITE = '1';
+const vite = await viteServer({ configFile: new URL('../../../apps/web/vite.config.ts', import.meta.url).pathname, root: new URL('../../../apps/web/', import.meta.url).pathname, server: { host: '127.0.0.1', port: Number(new URL(origin).port) || 5180, strictPort: true, proxy: { '/api': 'http://127.0.0.1:5181', '/__moa': 'http://127.0.0.1:5181' } } });
+await vite.listen(); console.info(`moa-lite: ${origin} · setup code: ${process.env.SETUP_CODE ?? 'LITE-LOCA-LSET-UP01'}`);
+process.on('SIGTERM', () => { api.close(); void vite.close(); });

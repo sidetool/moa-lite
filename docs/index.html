@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="moa-lite 배포 가이드: 설정 코드를 만들고 Vercel 무료 요금제에 나만의 영상 앱을 배포합니다.">
+<title>moa-lite 배포 가이드</title>
+<style>
+:root{--bg:#f4f3f8;--panel:#fbfbfd;--line:#d9d7e3;--text:#22232b;--muted:#6c6e7a;--accent:#6d4fe0;--accent-soft:#e8e2fb;--ok:#2f7a57;--warn:#a1550f;--star:#b7791f;--field:#fff;font:16px/1.65 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:var(--bg);color:var(--text)}
+@media (prefers-color-scheme:dark){:root{--bg:#0f0f13;--panel:#18181e;--line:#33333d;--text:#e7e7ec;--muted:#9c9ca8;--accent:#a48cff;--accent-soft:#2a2346;--ok:#6fcf9f;--warn:#f0a85a;--star:#f2c14e;--field:#1f1f26}}
+*{box-sizing:border-box}
+body{max-width:720px;margin:0 auto;padding:20px 20px 64px}
+nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:28px}
+nav .brand{font-weight:800;font-size:1.2rem;letter-spacing:-.04em;color:var(--text);text-decoration:none}
+nav .links{display:flex;flex-wrap:wrap;gap:8px}
+nav .links a{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);font-size:.88rem;text-decoration:none}
+nav .links a:hover{border-color:var(--accent)}
+h1{margin:0 0 6px;font-size:1.9rem;letter-spacing:-.05em}
+h2{margin:0;font-size:1.15rem;letter-spacing:-.02em}
+h3{margin:24px 0 8px;font-size:1rem}
+p{margin:10px 0}
+a{color:var(--accent)}
+code{padding:1px 6px;border-radius:5px;background:var(--accent-soft);font-size:.9em;overflow-wrap:anywhere}
+.lead{color:var(--muted)}
+.summary{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px;padding:0;list-style:none;font-size:.9rem}
+.summary li{margin:0;padding:4px 12px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+.notice{margin:18px 0;padding:14px 18px;border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;background:var(--panel);font-size:.92rem}
+.notice p{margin:4px 0}
+.step{position:relative;margin:18px 0;padding:22px 22px 22px 70px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
+.step::before{content:attr(data-step);position:absolute;left:20px;top:20px;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.step.done::before{content:'✓';background:var(--ok);color:var(--panel)}
+.hint{color:var(--muted);font-size:.9rem}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button,.action{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 18px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--text);font:inherit;white-space:nowrap;text-decoration:none;cursor:pointer}
+button.primary,.action.primary{border-color:var(--accent);background:var(--accent);color:var(--panel);font-weight:650}
+button.small{min-height:36px;padding:0 12px;font-size:.88rem}
+button:disabled{opacity:.45;cursor:not-allowed}
+.action.waiting{opacity:.55}
+label{display:grid;gap:6px;margin-top:14px;font-size:.9rem;color:var(--muted)}
+.copyfield{display:flex;gap:8px}
+.copyfield input{flex:1}
+input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--text);font:inherit}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88rem}
+#status{min-height:1.6em;margin:10px 0 0;color:var(--ok);font-weight:600}
+.fields{margin:14px 0 0;padding:0;list-style:none;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.fields li{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:12px;margin:0;padding:10px 14px;border-top:1px solid var(--line);font-size:.92rem}
+.fields li:first-child{border-top:0}
+.fields li>*{min-width:0;overflow-wrap:anywhere}
+.fields b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;font-weight:600}
+ol,ul{padding-left:22px}
+li{margin:6px 0}
+.alt{margin:36px 0 0;padding-top:24px;border-top:1px solid var(--line)}
+.alt>p{color:var(--muted)}
+.star{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(135deg,var(--panel),var(--accent-soft))}
+.star h2::before{content:'★ ';color:var(--star)}
+.star .action{flex:1 1 220px}
+.star .action span{opacity:.75;font-weight:400;font-size:.85rem}
+.faq{margin-top:40px}
+details{margin:12px 0;padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+summary{cursor:pointer;font-weight:650}
+footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+@media (max-width:640px){.fields li{grid-template-columns:1fr;gap:4px}}
+@media (max-width:520px){.step{padding:62px 16px 18px}.step::before{left:16px;top:16px}button,.action{flex:1}.row .primary{flex-basis:100%}.copyfield button{flex:0 0 auto}}
+</style>
+</head>
+<body>
+<nav aria-label="프로젝트 링크">
+  <a class="brand" href="https://github.com/sidetool/moa-lite" target="_blank" rel="noopener noreferrer">moa-lite</a>
+  <div class="links">
+    <a href="https://github.com/sidetool/moa-lite" target="_blank" rel="noopener noreferrer">★ GitHub</a>
+    <a href="https://github.com/sidetool/moa" target="_blank" rel="noopener noreferrer">MOA (Docker판)</a>
+  </div>
+</nav>
+
+<h1>나만의 영상 앱 만들기</h1>
+<p class="lead">moa-lite는 <a href="https://github.com/sidetool/moa" target="_blank" rel="noopener noreferrer">MOA</a>의 화면과 플레이어를 그대로 옮겨, 서버 없이 Vercel 무료 요금제에서 돌아가게 만든 개인용 영상 앱입니다. 아래 세 단계를 따라 하면 내 앱이 만들어집니다.</p>
+<ul class="summary" aria-label="준비물"><li>GitHub 계정</li><li>Vercel 계정 (GitHub로 가입)</li><li>약 5분</li></ul>
+
+<div class="notice">
+  <p><strong>영상과 확장 저장소는 들어 있지 않습니다.</strong> 처음에는 빈 앱이고, 쓸 Mangayomi JS 저장소는 직접 추가합니다. 무엇을 추가하고 보는지는 사용자의 책임입니다. <a href="https://github.com/sidetool/moa-lite/blob/main/DISCLAIMER.md" target="_blank" rel="noopener noreferrer">면책 조항</a></p>
+</div>
+
+<section class="step" id="step-key" data-step="1">
+  <h2>설정 코드와 비밀키 만들기</h2>
+  <p>첫 관리자 계정을 만들 때 쓰는 <strong>설정 코드</strong>와, 로그인·저장된 API 키를 보호하는 <strong>앱 비밀키</strong>입니다. 이 브라우저 안에서만 만들어지고 어디에도 전송되지 않습니다.</p>
+  <div class="row"><button id="generate" class="primary">두 값 만들기</button><button id="download" disabled>파일로 보관</button></div>
+  <label>SETUP_CODE
+    <span class="copyfield"><input id="setupCode" class="mono" readonly placeholder="두 값 만들기를 누르세요"><button class="small" data-copy="setupCode" disabled>복사</button></span>
+  </label>
+  <label>APP_SECRET
+    <span class="copyfield"><input id="appSecret" class="mono" readonly><button class="small" data-copy="appSecret" disabled>복사</button></span>
+  </label>
+  <p id="status" role="status"></p>
+  <p class="hint">값은 자동으로 저장되지 않으니 <strong>파일로 보관</strong>해 두세요. 설정 코드는 3단계에서 한 번 더 씁니다. 앱 비밀키는 업데이트할 때도 바꾸지 마세요. 바꾸면 저장한 TMDB·Gemini 키를 다시 넣어야 합니다.</p>
+</section>
+
+<section class="step" id="step-deploy" data-step="2">
+  <h2>Vercel에 배포하기</h2>
+  <p class="hint">원클릭 배포는 처음 설치하기 간편하지만, 내 저장소가 Fork가 아닌 복사본으로 만들어져 이후 업데이트가 조금 번거롭습니다. 업데이트를 자주 받을 생각이면 아래 <a href="#fork-deploy">Fork로 배포하기</a>도 좋습니다.</p>
+  <div class="row"><a id="deploy" class="action primary waiting" target="_blank" rel="noopener noreferrer">Vercel 배포 시작 ↗</a></div>
+  <p class="hint" id="deployHint">먼저 1단계에서 두 값을 만들어 주세요.</p>
+  <h3>새 창에서 할 일</h3>
+  <ol>
+    <li><strong>GitHub로 로그인</strong>하고, 저장소 이름을 정한 뒤 <strong>Create</strong>를 누릅니다.</li>
+    <li><strong>Upstash</strong> 저장 공간을 새로 만들고 요금제는 <strong>Free</strong>를 고릅니다. 계정과 시청 기록을 보관하는 곳입니다. 지역은 서울이 없으면 도쿄(Tokyo)를 고르세요. <strong>Free가 안 보이면</strong> 유료 요금제를 고르지 말고 새 창을 닫은 뒤, 아래 <a href="#fork-deploy">Free가 안 보일 때</a> 방법으로 배포하세요.</li>
+    <li>환경변수를 아래처럼 채우고 <strong>Deploy</strong>를 누릅니다. 빌드는 몇 분 걸립니다.</li>
+  </ol>
+  <ul class="fields" aria-label="입력할 환경변수">
+    <li><b>APP_SECRET</b><span>1단계의 앱 비밀키를 붙여 넣기</span></li>
+    <li><b>SETUP_CODE</b><span>1단계의 설정 코드를 붙여 넣기</span></li>
+    <li><b>ENABLE_EXPERIMENTAL_COREPACK</b><span><code>1</code>이 미리 들어가 있어요. 그대로 두세요.</span></li>
+  </ul>
+  <p class="hint">계정 연결과 약관 동의는 직접 진행해야 합니다. 배포가 끝나면 앱 미리보기를 눌러 내 앱 주소(<code>이름.vercel.app</code>)를 엽니다.</p>
+</section>
+
+<section class="step" id="step-setup" data-step="3">
+  <h2>관리자 계정 만들고 시작하기</h2>
+  <ol>
+    <li>내 앱 주소를 열면 <strong>관리자 계정 만들기</strong> 화면이 나옵니다. 바로 나오지 않으면 주소 뒤에 <code>/__moa/setup</code>을 붙여 엽니다.</li>
+    <li>1단계의 설정 코드와 원하는 아이디·비밀번호를 입력합니다. 다음부터는 아이디·비밀번호로 로그인합니다.</li>
+    <li>프로필을 만든 뒤 <strong>영상 소스</strong>에서 쓸 Mangayomi JS 저장소 주소를 추가하고 소스를 설치합니다. 기본으로 들어 있는 저장소는 없습니다.</li>
+    <li>작품 정보와 자막 번역을 쓰려면 <strong>설정</strong>에서 TMDB·Gemini API 키를 넣습니다. 둘 다 선택 사항입니다.</li>
+  </ol>
+  <p class="hint">다른 사람은 <strong>계정과 초대</strong>에서 초대합니다. 휴대폰에서는 브라우저 메뉴의 <strong>홈 화면에 추가</strong>로 앱처럼 쓸 수 있습니다.</p>
+</section>
+
+<section class="alt" id="fork-deploy" aria-labelledby="forkTitle">
+  <h2 id="forkTitle">Free가 안 보일 때 · 업데이트를 쉽게: Fork로 배포하기</h2>
+  <p>이미 Upstash 저장 공간을 만든 적 있는 계정에서는 2단계 새 창에 Free 없이 유료 요금제만 보일 수 있습니다. 이때는 Upstash 콘솔에서 Free 저장 공간을 직접 만들고, 저장소를 Fork해서 배포합니다. Fork는 GitHub의 <strong>Sync fork</strong> 버튼으로 업데이트할 수 있어 편합니다. 1단계의 두 값은 그대로 씁니다.</p>
+
+  <section class="step" id="step-redis" data-step="A">
+    <h2>Upstash에 무료 저장 공간 만들기</h2>
+    <div class="row"><a class="action primary" href="https://console.upstash.com/redis" target="_blank" rel="noopener noreferrer">Upstash 콘솔 열기 ↗</a></div>
+    <ol>
+      <li>GitHub로 로그인하고 <strong>Create Database</strong>를 누릅니다.</li>
+      <li>이름은 자유롭게 정하고, <strong>Primary Region</strong>은 앱 서버(서울)와 가까운 곳을 고릅니다. 서울이 없으면 도쿄(Tokyo)를 고르세요.</li>
+      <li>요금제는 <strong>Free</strong>를 고르고 만듭니다. <strong>Pay as you go</strong>는 사용한 만큼 요금이 나오니 고르지 마세요.</li>
+      <li>만든 데이터베이스 화면의 <strong>REST API</strong> 항목에서 주소와 토큰을 복사해 아래에 붙여 넣습니다.</li>
+    </ol>
+    <label>UPSTASH_REDIS_REST_URL<input id="redisUrl" placeholder="https://….upstash.io" autocomplete="off" spellcheck="false"></label>
+    <label>UPSTASH_REDIS_REST_TOKEN<input id="redisToken" type="password" autocomplete="off" spellcheck="false"></label>
+    <p class="hint" id="redisHint">주소는 <code>https://</code>로 시작하는 REST 주소입니다. <code>redis://</code>나 <code>rediss://</code>로 시작하는 주소는 쓰지 않습니다. 붙여 넣은 값은 C단계에서 한꺼번에 복사하는 데만 쓰입니다.</p>
+  </section>
+
+  <section class="step" id="step-fork" data-step="B">
+    <h2>GitHub에서 Fork하기</h2>
+    <div class="row"><a id="fork" class="action primary" href="https://github.com/sidetool/moa-lite/fork" target="_blank" rel="noopener noreferrer">moa-lite Fork하기 ↗</a></div>
+    <ol>
+      <li><strong>Owner</strong>가 내 계정인지 확인하고, 저장소 이름은 그대로 두거나 원하는 이름으로 바꿉니다.</li>
+      <li><strong>Copy the main branch only</strong>는 체크된 채로 두고 <strong>Create fork</strong>를 누릅니다.</li>
+    </ol>
+  </section>
+
+  <section class="step" id="step-import" data-step="C">
+    <h2>Vercel에서 가져와 배포하기</h2>
+    <div class="row"><button id="copyEnv">환경변수 한꺼번에 복사</button><a id="import" class="action primary" href="https://vercel.com/new" target="_blank" rel="noopener noreferrer">Vercel 프로젝트 만들기 ↗</a></div>
+    <p id="envStatus" class="hint" role="status"></p>
+    <ol>
+      <li><strong>Import Git Repository</strong> 목록에서 B단계에서 만든 저장소의 <strong>Import</strong>를 누릅니다. 목록에 없으면 <strong>Adjust GitHub App Permissions</strong>에서 그 저장소 접근을 허용합니다.</li>
+      <li><strong>Framework Preset</strong>과 <strong>Build and Output Settings</strong>는 건드리지 않습니다. 저장소의 <code>vercel.json</code>을 그대로 씁니다.</li>
+      <li><strong>Environment Variables</strong>를 펼치고 첫 <strong>Key</strong> 칸에 복사한 내용을 붙여 넣으면 다섯 줄이 한 번에 채워집니다. 안 되면 아래 표를 보고 하나씩 넣습니다.</li>
+      <li><strong>Deploy</strong>를 누르고, 끝나면 위 3단계대로 관리자 계정을 만듭니다.</li>
+    </ol>
+    <ul class="fields" aria-label="Fork 배포에 입력할 환경변수">
+      <li><b>APP_SECRET</b><span>1단계의 앱 비밀키</span></li>
+      <li><b>SETUP_CODE</b><span>1단계의 설정 코드</span></li>
+      <li><b>ENABLE_EXPERIMENTAL_COREPACK</b><span><code>1</code></span></li>
+      <li><b>UPSTASH_REDIS_REST_URL</b><span>A단계의 REST 주소</span></li>
+      <li><b>UPSTASH_REDIS_REST_TOKEN</b><span>A단계의 REST 토큰</span></li>
+    </ul>
+  </section>
+</section>
+
+<section class="star" aria-labelledby="starTitle">
+  <h2 id="starTitle">잘 만들어졌나요?</h2>
+  <p>GitHub에서 Star를 눌러 주시면 프로젝트를 이어 가는 데 큰 힘이 됩니다. 내 서버에서 Aniyomi 확장·내 영상 파일·FFmpeg 변환까지 쓰고 싶다면 Docker판 MOA를 둘러보세요.</p>
+  <div class="row">
+    <a class="action primary" href="https://github.com/sidetool/moa-lite" target="_blank" rel="noopener noreferrer">★ moa-lite에 Star</a>
+    <a class="action" href="https://github.com/sidetool/moa" target="_blank" rel="noopener noreferrer">★ MOA <span>Docker 자체 호스팅판</span></a>
+  </div>
+</section>
+
+<section class="faq" aria-labelledby="faqTitle">
+<h2 id="faqTitle">막혔을 때</h2>
+
+<details id="config-help">
+  <summary>앱이 열리지 않거나 “hosting-not-configured” 오류가 나와요</summary>
+  <p>필요한 환경변수가 빠졌거나 형식이 맞지 않는 상태입니다. 내 앱 주소 뒤에 <code>/api/health</code>를 붙여 열면 빠진 항목이 <code>missing</code>에 표시됩니다. <code>"ok": true</code>가 나오면 정상입니다.</p>
+  <ul>
+    <li><code>APP_SECRET</code> — 32자 이상이어야 합니다. 1단계에서 만든 64자 값을 쓰세요.</li>
+    <li><code>SETUP_CODE</code> — <code>AB12-CD34-EF56-7890</code>처럼 영문·숫자 4자리씩 네 묶음이어야 합니다.</li>
+    <li><code>UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN</code> — 저장 공간이 연결되지 않았습니다. 아래 항목을 보세요.</li>
+  </ul>
+  <p class="hint">값을 고친 뒤에는 <strong>Deployments → ⋯ → Redeploy</strong>를 눌러야 적용됩니다.</p>
+</details>
+
+<details id="storage-help">
+  <summary>저장 공간(Upstash)을 나중에 연결하고 싶어요</summary>
+  <ol>
+    <li><a href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer">Vercel 대시보드</a>에서 내 moa-lite 프로젝트를 엽니다.</li>
+    <li><strong>Storage → Create Database</strong>에서 <strong>Upstash → Redis</strong>를 고르고 <strong>Free</strong> 요금제로 만듭니다. 이미 만든 게 있다면 그것을 골라도 됩니다.</li>
+    <li><strong>Connect to Project</strong>에서 내 프로젝트를, 환경은 <strong>Production</strong>을 고릅니다.</li>
+    <li><strong>Deployments</strong>에서 가장 최근 배포의 <strong>⋯ → Redeploy</strong>를 누릅니다.</li>
+  </ol>
+  <p class="hint">이렇게 연결하면 Vercel이 <code>KV_REST_API_URL</code>·<code>KV_REST_API_TOKEN</code>을 넣어 주며, moa-lite는 이 이름도 읽습니다. Upstash 콘솔에서 직접 복사했다면 <code>UPSTASH_REDIS_REST_URL</code>·<code>UPSTASH_REDIS_REST_TOKEN</code>으로 넣습니다. 주소는 <code>https://</code>로 시작해야 합니다.</p>
+</details>
+
+<details id="free-plan-help">
+  <summary>Upstash 요금제에 Free가 안 보여요</summary>
+  <p>이미 Upstash 저장 공간을 만든 적 있는 계정에서는 Vercel 화면에 Pay as you go나 Fixed 같은 유료 요금제만 보일 수 있습니다. Pay as you go는 Free의 무료 사용량이 따로 남지 않고 처음부터 사용량만큼 요금이 붙으니 고르지 마세요.</p>
+  <p>대신 <a href="#fork-deploy">Fork로 배포하기</a>를 따라 Upstash 콘솔에서 Free 저장 공간을 직접 만들어 연결하세요.</p>
+</details>
+
+<details id="code-help">
+  <summary>설정 코드를 잃어버렸어요</summary>
+  <p>Vercel 프로젝트의 <strong>Settings → Environment Variables</strong>에서 <code>SETUP_CODE</code> 값을 확인할 수 있습니다. 새 코드로 바꾸려면 이 페이지에서 다시 만들어 값을 바꾸고 Redeploy합니다. 설정 코드는 관리자 계정이 하나도 없을 때만 쓰입니다.</p>
+</details>
+
+<details id="sync-help">
+  <summary>새 버전으로 업데이트하고 싶어요</summary>
+  <p><strong>Fork로 배포했다면</strong> GitHub에서 내 저장소의 <strong>main</strong> 브랜치를 선택하고 <strong>Sync fork → Update branch</strong>를 누릅니다. Vercel이 자동으로 새로 배포합니다.</p>
+  <p><strong>Vercel 배포 시작으로 배포했다면</strong> 내 저장소가 Fork가 아닌 복사본이라 이 버튼이 없습니다. <a href="https://github.com/sidetool/moa-lite/blob/main/docs/DEPLOYMENT.md#새-버전-받기" target="_blank" rel="noopener noreferrer">배포 문서의 새 버전 받기</a> 명령으로 가져옵니다.</p>
+  <p><strong>Redeploy만으로 원본의 최신 코드를 가져오지는 않습니다.</strong> 선택한 기존 배포를 다시 빌드하는 기능입니다. <code>APP_SECRET</code>과 Upstash 저장 공간을 그대로 두면 계정과 기록이 유지됩니다.</p>
+  <p><strong>Deployment Blocked</strong>와 커밋 작성자 권한 오류가 나오면 아래 항목을 확인하세요.</p>
+</details>
+
+<details id="blocked-help">
+  <summary>배포가 작성자 권한 때문에 막혔어요 (Deployment Blocked)</summary>
+  <p><code>The deployment was blocked because the commit author did not have contributing access</code> 오류에 해당합니다. Vercel Hobby의 비공개 저장소는 커밋 작성자가 프로젝트를 소유한 Hobby 계정과 연결되어 있어야 합니다. 원본 코드를 가져와도 작성자는 원본 개발자로 남을 수 있습니다. <a href="https://vercel.com/docs/deployments/troubleshoot-project-collaboration" target="_blank" rel="noopener noreferrer">Vercel 공식 안내</a></p>
+  <ol>
+    <li><strong>Vercel에 연결한 본인 GitHub 계정</strong>으로 로그인하고, 내 저장소에서 <strong>main → README.md → 연필(Edit)</strong>을 엽니다.</li>
+    <li>맨 아래에 <code>&lt;!-- deployment check --&gt;</code>를 추가합니다. 이미 있으면 주석 안에 날짜 등을 붙여 바꿉니다. 이 주석은 README 화면에 표시되지 않습니다.</li>
+    <li><strong>Commit changes</strong>에서 <strong>main에 직접 커밋</strong>합니다.</li>
+    <li>Vercel <strong>Deployments</strong>에서 방금 만든 커밋의 <strong>새 배포</strong>가 <strong>Ready · Production</strong>인지 확인합니다. 이전에 막힌 배포의 Redeploy를 누르지 마세요.</li>
+  </ol>
+</details>
+
+<details id="playback-help">
+  <summary>어떤 소스는 목록이 안 뜨거나 재생이 안 돼요</summary>
+  <p>Vercel에 배포해도 원본 사이트의 접근 제한·Cloudflare 인증·데이터센터 IP 차단은 풀리지 않고, 쓸 수 있는 소스도 저장소마다 다릅니다. 영상은 브라우저가 원본에서 직접 받으므로 브라우저가 바로 재생할 수 있는 HTTPS MP4·WebM·HLS만 재생됩니다. WebView가 필요한 소스나 FFmpeg 변환이 필요한 포맷은 지원하지 않습니다.</p>
+  <p>PC에서는 선택 사항인 <strong>연결 확장</strong>을 설치하면 내 브라우저로 원본에 접속합니다. 설치 방법은 <a href="https://github.com/sidetool/moa-lite/blob/main/docs/DEPLOYMENT.md#pc-연결-확장-선택-사항" target="_blank" rel="noopener noreferrer">배포 문서</a>를 참고하세요.</p>
+</details>
+
+<details id="usage-help">
+  <summary>정말 무료인가요?</summary>
+  <p>Vercel Hobby와 Upstash Free의 사용량 한도 안에서는 무료입니다. 한도는 무제한이 아니며, Vercel Hobby는 개인·비상업 용도로만 쓸 수 있습니다. 관리자 계정의 <strong>설정 → 운영 → 진단 · 할당량</strong>에서 한도와 공식 사용량 화면 링크를 확인할 수 있습니다. 유료 요금제를 고르면 요금이 나올 수 있으니 직접 확인하세요.</p>
+</details>
+</section>
+
+<footer>
+  <p>이 페이지에서 만든 값과 입력한 값은 페이지 밖으로 전송되지 않습니다.</p>
+  <p>moa-lite는 콘텐츠·확장 저장소를 제공하지 않으며, 각 배포본은 배포한 사람이 운영합니다. <a href="https://github.com/sidetool/moa-lite/blob/main/DISCLAIMER.md" target="_blank" rel="noopener noreferrer">면책 조항</a> · <a href="https://github.com/sidetool/moa-lite#readme" target="_blank" rel="noopener noreferrer">README</a> · <a href="https://github.com/sidetool/moa-lite/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a></p>
+  <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const hex = bytes => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+function link() {
+  const url = new URL('https://vercel.com/new/clone');
+  url.searchParams.set('repository-url', 'https://github.com/sidetool/moa-lite');
+  url.searchParams.set('project-name', 'moa-lite');
+  url.searchParams.set('repository-name', 'moa-lite');
+  url.searchParams.set('env', 'APP_SECRET,SETUP_CODE,ENABLE_EXPERIMENTAL_COREPACK');
+  url.searchParams.set('envDescription', 'APP_SECRET: 배포 가이드에서 만든 64자 비밀키. SETUP_CODE: 배포 가이드에서 만든 설정 코드(XXXX-XXXX-XXXX-XXXX). ENABLE_EXPERIMENTAL_COREPACK: 1 그대로.');
+  url.searchParams.set('envLink', 'https://sidetool.github.io/moa-lite/');
+  url.searchParams.set('envDefaults', JSON.stringify({ ENABLE_EXPERIMENTAL_COREPACK: '1' }));
+  url.searchParams.set('products', JSON.stringify([{ type: 'integration', integrationSlug: 'upstash', productSlug: 'upstash-kv', protocol: 'storage' }]));
+  $('deploy').href = url.href;
+}
+// Upstash 콘솔에서 `NAME="값"` 줄을 통째로 복사해 와도 값만 남깁니다.
+const clean = value => value.trim().replace(/^[A-Z_]+=/, '').replace(/^["']|["']$/g, '');
+const redisHint = $('redisHint').innerHTML;
+function checkRedis() {
+  const url = clean($('redisUrl').value);
+  const wrong = /^rediss?:/.test(url);
+  $('redisHint').style.color = wrong ? 'var(--warn)' : '';
+  if (wrong) $('redisHint').textContent = '이 주소는 REST 주소가 아닙니다. REST API 항목에서 https://로 시작하는 주소를 복사해 주세요.';
+  else $('redisHint').innerHTML = redisHint;
+  $('step-redis').classList.toggle('done', url.startsWith('https://') && !!clean($('redisToken').value));
+}
+async function copy(id, message) {
+  try { await navigator.clipboard.writeText($(id).value); $('status').textContent = message; }
+  catch { $(id).select(); $('status').textContent = '선택된 값을 직접 복사해 주세요.'; }
+}
+$('generate').onclick = async () => {
+  if ($('setupCode').value && !confirm('새로 만들면 지금 값은 쓸 수 없게 됩니다. 이미 배포에 넣었다면 Vercel의 값도 바꿔야 합니다. 계속할까요?')) return;
+  $('setupCode').value = hex(8).toUpperCase().match(/.{4}/g).join('-');
+  $('appSecret').value = hex(32);
+  document.querySelectorAll('[data-copy]').forEach(button => { button.disabled = false; });
+  $('download').disabled = false;
+  $('step-key').classList.add('done');
+  $('deploy').classList.remove('waiting');
+  $('deployHint').textContent = '새 창의 APP_SECRET·SETUP_CODE 칸에 위의 복사 버튼으로 하나씩 붙여 넣으면 됩니다.';
+  $('status').textContent = '두 값을 만들었습니다. 파일로도 보관해 두세요.';
+};
+document.querySelectorAll('[data-copy]').forEach(button => {
+  button.onclick = () => copy(button.dataset.copy, `${button.dataset.copy === 'setupCode' ? 'SETUP_CODE' : 'APP_SECRET'}를 복사했습니다.`);
+});
+$('download').onclick = () => {
+  const text = `# moa-lite 배포 값 — 안전한 곳에 보관하세요.\nSETUP_CODE=${$('setupCode').value}\nAPP_SECRET=${$('appSecret').value}\n`;
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  const anchor = document.createElement('a');
+  anchor.href = url; anchor.download = 'moa-lite-deploy-values.txt'; anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  $('status').textContent = '파일을 내려받았습니다.';
+};
+$('deploy').addEventListener('click', event => {
+  if ($('setupCode').value) { $('step-deploy').classList.add('done'); return; }
+  if (!confirm('아직 1단계 값을 만들지 않았어요. 값 없이 배포하면 나중에 환경변수를 직접 넣고 다시 배포해야 합니다. 계속할까요?')) event.preventDefault();
+});
+$('copyEnv').onclick = async () => {
+  const entries = [
+    ['APP_SECRET', $('appSecret').value],
+    ['SETUP_CODE', $('setupCode').value],
+    ['ENABLE_EXPERIMENTAL_COREPACK', '1'],
+    ['UPSTASH_REDIS_REST_URL', clean($('redisUrl').value)],
+    ['UPSTASH_REDIS_REST_TOKEN', clean($('redisToken').value)],
+  ];
+  const missing = entries.filter(([, value]) => !value).map(([name]) => name);
+  if (missing.length && !confirm(`${missing.join(', ')} 값이 비어 있어요. 빈 값은 Vercel에서 직접 채워야 합니다. 그래도 복사할까요?`)) return;
+  try {
+    await navigator.clipboard.writeText(entries.map(([name, value]) => `${name}=${value}`).join('\n') + '\n');
+    $('envStatus').textContent = '환경변수 5개를 복사했습니다. Vercel의 첫 Key 칸에 붙여 넣으세요.';
+  } catch { $('envStatus').textContent = '복사하지 못했습니다. 아래 표를 보고 하나씩 입력해 주세요.'; }
+};
+$('fork').addEventListener('click', () => $('step-fork').classList.add('done'));
+$('import').addEventListener('click', () => $('step-import').classList.add('done'));
+$('redisUrl').oninput = checkRedis;
+$('redisToken').oninput = checkRedis;
+link();
+// #storage-help 같은 링크는 해당 안내를 펼쳐서 엽니다.
+const target = location.hash && document.querySelector(`details${location.hash}`);
+if (target) target.open = true;
+</script>
+</body>
+</html>

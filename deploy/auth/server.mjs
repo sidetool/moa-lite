@@ -16,7 +16,7 @@ const equal = (a, b) => {
 };
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-export function createAuthServer({ credentials, database, origin, allowedOrigins = [origin], secure = true, allowAnyHost = false, trustProxy = false, connectorSecretFile, now = Date.now }) {
+export function createAuthServer({ credentials, database, origin, allowedOrigins = [origin], secure = true, allowAnyHost = false, trustProxy = false, connectorSecretFile, now = Date.now, serverless = false }) {
   const context = new AsyncLocalStorage();
   const isSecure = () => context.getStore()?.secure ?? secure;
   const cookieName = kind => `${isSecure() ? '__Host-' : ''}moa_${kind}`;
@@ -154,7 +154,7 @@ export function createAuthServer({ credentials, database, origin, allowedOrigins
     return redirect(res, `${PREFIX}continue?next=${encodeURIComponent(target(next))}`, { 'Set-Cookie': [cookie(cookieName('session'), token, remember ? 365 * 86400 : null), cookie(cookieName('csrf'), '', 0)] });
   }
 
-  const server = http.createServer((req, res) => context.run({ secure: trustProxy ? req.headers['x-forwarded-proto'] === 'https' : secure }, async () => {
+  const handle = (req, res) => context.run({ secure: trustProxy ? req.headers['x-forwarded-proto'] === 'https' : secure }, async () => {
     try {
       const url = new URL(req.url, publicUrl);
       if (url.pathname === '/healthz' && req.method === 'GET') return send(res, 200, 'ok', { 'Content-Type': 'text/plain' });
@@ -311,7 +311,9 @@ export function createAuthServer({ credentials, database, origin, allowedOrigins
       else res.destroy();
       if (!error.status) console.error('Authentication request failed:', error.name);
     }
-  }));
+  });
+  if (serverless) return { handle };
+  const server = http.createServer(handle);
   server.requestTimeout = 15000;
   const cleanup = setInterval(() => {
     database.prepare('DELETE FROM sessions WHERE expires <= ?').run(now());

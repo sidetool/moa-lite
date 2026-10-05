@@ -1,0 +1,40 @@
+{
+  "name": "@moa/lite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build": "tsx build.ts",
+    "dev": "node --env-file-if-exists=../../.env --import tsx server/dev.ts",
+    "test": "tsx --test test/*.test.ts",
+    "test:browser": "tsx test/browser.ts && tsx test/regressions.ts && tsx test/connector-browser.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify:vercel": "tsx test/vercel.ts"
+  },
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@moa/extensions": "workspace:*",
+    "@moa/shared": "workspace:*",
+    "@moa/skip-markers": "workspace:*",
+    "@moa/subtitles-ko": "workspace:*",
+    "@noble/ciphers": "2.4.0",
+    "@noble/hashes": "2.0.1",
+    "buffer": "6.0.3",
+    "linkedom": "0.18.12",
+    "quickjs-emscripten-core": "0.32.0",
+    "sql.js": "1.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/sql.js": "1.4.9",
+    "@vercel/build-utils": "^14.2.0",
+    "@vercel/node": "^5.10.2",
+    "ajv": "^8.20.0",
+    "ajv-draft-04": "^1.0.0",
+    "esbuild": "0.25.12",
+    "playwright-core": "1.61.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

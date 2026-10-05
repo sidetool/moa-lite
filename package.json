@@ -1,13 +1,19 @@
 {
-  "name": "moa",
+  "name": "moa-lite",
   "private": true,
+  "type": "module",
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@10.12.1",
+  "engines": { "node": "24.x" },
   "scripts": {
     "dev:web": "corepack pnpm --filter @moa/web dev",
     "dev:server": "corepack pnpm --filter @moa/server dev",
-    "build": "corepack pnpm -r build",
+    "build": "corepack pnpm --filter @moa/subtitles-ko build && corepack pnpm --filter @moa/skip-markers build && corepack pnpm --filter @moa/extensions build && corepack pnpm --filter @moa/lite build && corepack pnpm --filter @moa/web build",
     "typecheck": "corepack pnpm -r typecheck",
-    "test": "corepack pnpm -r test"
+    "test": "corepack pnpm -r test",
+    "dev": "corepack pnpm --filter @moa/lite dev",
+    "test:lite": "corepack pnpm --filter @moa/lite test",
+    "test:browser": "corepack pnpm --filter @moa/lite test:browser",
+    "verify:vercel": "corepack pnpm --filter @moa/lite verify:vercel"
   }
 }
