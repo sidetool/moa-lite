@@ -149,7 +149,7 @@ export class BlogCollector {
     });
   }
 
-  /** Number-only/opaque filenames inherit the article identity; named files must agree. */
+  /** Fallback identity check when the article has not established the requested episode/series. */
   private fileIdentity(raw: string, creator: SubtitleCreator): boolean | undefined {
     const name = (raw.split(/[\\/]/).at(-1) ?? raw).split("\n")[0]!.trim()
       .replace(/\.(?:zip|7z|rar|tar|ass|ssa|srt|smi|vtt)$/i, "")
@@ -269,6 +269,9 @@ export class BlogCollector {
     const confirmedPost = this.titleMatches(title, creator) && this.episodeMatch(title, creator, episode);
     const pageSeason = this.postSeason(title, creator);
     const pageEpisodes = this.pageEpisodes(title, creator);
+    // Once the article establishes the work, filenames only select the episode.
+    // Creators routinely use arbitrary abbreviations or release names.
+    const confirmedArticle = confirmedPost || seriesPage;
     if (pageSeason !== undefined && pageSeason !== creator.season) return null;
     const attachments = extractAttachmentLinks(page.html, page.url);
     const expanded: Link[] = [];
@@ -284,7 +287,7 @@ export class BlogCollector {
     for (const link of links.slice(0, 6)) {
       if (signal.aborted) break;
       const label = link.label || decodeURIComponentSafe(new URL(link.url).pathname.split("/").at(-1) ?? "");
-      if (this.fileIdentity(label, creator) === false) continue;
+      if (!confirmedArticle && this.fileIdentity(label, creator) === false) continue;
       const linkSeason = this.postSeason(label, creator);
       if (linkSeason !== undefined && linkSeason !== creator.season) continue;
       const numbers = parseEpisodes(label);
@@ -300,7 +303,7 @@ export class BlogCollector {
         const filename = responseFilename(response, label || "subtitle");
         const extracted = await extractSubtitleBuffer(response.body, filename, {
           episode, alternateEpisode: creator.episodeOffset ? episode + creator.episodeOffset : undefined,
-          acceptFilename: name => this.fileIdentity(name, creator) !== false,
+          acceptFilename: name => confirmedArticle || this.fileIdentity(name, creator) !== false,
           season: creator.season, allowUnnumbered: (confirmedPost || confirmedLink) && numbers.length <= 1 && pageEpisodes.length <= 1,
           maxZipBytes: this.options.maxZipBytes, maxEntries: this.options.maxZipEntries, signal,
         });
@@ -432,7 +435,7 @@ export class BlogCollector {
         const response = await this.download({ url: creator.website, label: "" }, creator.website, signal);
         const extracted = await extractSubtitleBuffer(response.body, responseFilename(response, "subtitle"), {
           episode, alternateEpisode: creator.episodeOffset ? episode + creator.episodeOffset : undefined,
-          acceptFilename: name => this.fileIdentity(name, creator) !== false,
+          acceptFilename: name => creator.source === "anissia" || this.fileIdentity(name, creator) !== false,
           season: creator.season, allowUnnumbered: creator.isCurrentEpisode,
           maxZipBytes: this.options.maxZipBytes, maxEntries: this.options.maxZipEntries, signal,
         });

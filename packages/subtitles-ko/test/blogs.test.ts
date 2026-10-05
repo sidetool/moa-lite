@@ -207,8 +207,9 @@ test('numeric series title is not an episode; opaque Drive bundle requires the r
   assert.equal(collector.titleMatches('로봇 탐험대 100 2기 OVA',creator),false);
   const drive='https://drive.google.com/file/d/abcdefghijklmnop/view';
   http.get=async url=>response(url,batchZip);
-  // Unrelated named files in the bundle are still rejected.
-  assert.equal(await collector.fromPage({url:'https://example-catalog.blogspot.com/series',html:`<h1>로봇 탐험대 100</h1><div class="post-body"><a href="${drive}">DL</a></div>`},creator,1,new AbortController().signal),null);
+  // The series article establishes the work; filenames only select numbered episodes.
+  assert.equal((await collector.fromPage({url:'https://example-catalog.blogspot.com/series',html:`<h1>로봇 탐험대 100</h1><div class="post-body"><a href="${drive}">DL</a></div>`},creator,1,new AbortController().signal))?.matchedEpisode,1);
+  assert.equal(await collector.fromPage({url:'https://example-catalog.blogspot.com/series',html:`<h1>로봇 탐험대 100</h1><div class="post-body"><a href="${drive}">DL</a></div>`},creator,100,new AbortController().signal),null);
   const valid = new BlogCollector(http,{maxZipBytes:10000,maxZipEntries:10,aliases:[]}) as any;
   assert.equal((await valid.fromPage({url:'https://example-catalog.blogspot.com/series',html:`<h1>가상 작품</h1><div class="post-body"><a href="${drive}">DL</a></div>`},legacyCreator,1,new AbortController().signal))?.matchedEpisode,1);
 });

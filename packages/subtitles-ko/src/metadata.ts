@@ -70,7 +70,11 @@ export class MetadataClient {
   }
 
   async lookup(names: string[], season: number, signal: AbortSignal): Promise<AnimeRecord | undefined> {
-    for (const name of [...new Set(names)].slice(0, 3)) {
+    // Anissia's text search can miss punctuation present in its own subject.
+    // Only broaden the query; compare returned identities against the original names.
+    const queries = [...new Set(names.map(name => name.normalize("NFKC")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 3);
+    for (const name of queries) {
       for (let page = 0; page < 3 && !signal.aborted; page++) {
         try {
           const data = await this.json(`${ANISSIA_API}/anime/list/${page}?q=${encodeURIComponent(name)}`, signal);

@@ -96,18 +96,18 @@ test('page episode: episode-1 listing and attachment cannot override an episode-
   assert.equal(result, null, observation(result, m.calls));
 });
 
-test('attachment identity: a different-work episode-1 attachment must be rejected', async () => {
+test('verified article identity is sufficient even when the attachment uses an unrecognized title', async () => {
   const m = mock(url => isSearch(url) ? anchor('/post', 'Example 1화 자막') :
     url.endsWith('/post') ? page('Example 1화 자막', 'Different Work 1화.srt') : srt('다른 작품 첨부'));
   const result = await m.collector.collect(creator(), 1, signal());
-  assert.equal(result, null, observation(result, m.calls));
+  assert.ok(result && result.confidence >= .5, observation(result, m.calls));
 });
 
-test('archive identity: correct page and label cannot override a different ZIP entry title', async () => {
+test('verified article identity also applies to unrecognized ZIP member titles', async () => {
   const m = mock(url => isSearch(url) ? anchor('/post', 'Example 1화 자막') :
     url.endsWith('/post') ? page('Example 1화 자막', 'Example 1화.zip', 'https://files.example/01.zip') : zip('different-work'));
   const result = await m.collector.collect(creator(), 1, signal());
-  assert.equal(result, null, observation(result, m.calls));
+  assert.ok(result && result.confidence >= .5, observation(result, m.calls));
 });
 
 test('archive episode: a 1~25.zip label cannot identify unnamed.srt as episode 1', async () => {
