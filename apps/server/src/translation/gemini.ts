@@ -3,6 +3,9 @@ import type { Line } from './subtitle.js';
 export const MODEL = 'gemini-flash-latest';
 const ROOT = 'https://generativelanguage.googleapis.com/v1beta';
 export const validModel = (model: string) => /^gemini-[a-z0-9][a-z0-9.-]{0,95}$/.test(model);
+// AI Studio authorization keys contain dots (AQ.Ab...). Keep legacy keys valid too.
+export const validGeminiKey = (key: unknown): key is string =>
+  typeof key === 'string' && /^[A-Za-z0-9._-]{16,256}$/.test(key);
 export class Gemini {
   constructor(private transport: typeof fetch = fetch) {}
   private async request(path: string, key: string, signal: AbortSignal, body?: unknown) {

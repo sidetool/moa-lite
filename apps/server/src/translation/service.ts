@@ -6,7 +6,7 @@ import type { TranslationConfig, TranslationJob, SubtitleTrack } from '@moa/shar
 import { Store } from '../db.js';
 import { Catalog } from '../catalog.js';
 import { ApiFailure } from '../util.js';
-import { Gemini, MODEL, validModel } from './gemini.js';
+import { Gemini, MODEL, validModel, validGeminiKey } from './gemini.js';
 import { subtitleDocument, nextBatch, translatedRanges, type Document } from './subtitle.js';
 
 interface Secret {
@@ -81,7 +81,7 @@ export class Translations {
     try {
       const saved = JSON.parse(readFileSync(this.filename, 'utf8'));
       const keys = (Array.isArray(saved.apiKeys) ? saved.apiKeys : saved.apiKey ? [saved.apiKey] : [])
-        .filter((key: unknown): key is string => typeof key === 'string' && /^[A-Za-z0-9_-]{16,256}$/.test(key))
+        .filter(validGeminiKey)
         .slice(0, 8);
       if (validModel(saved.model))
         this.secret = {
@@ -146,7 +146,7 @@ export class Translations {
     const next = { ...this.secret, apiKeys: [...this.secret.apiKeys] };
     if (update.apiKey !== undefined) {
       const key = update.apiKey.trim();
-      if (!/^[A-Za-z0-9_-]{16,256}$/.test(key)) throw new ApiFailure(400, 'translation-key-invalid');
+      if (!validGeminiKey(key)) throw new ApiFailure(400, 'translation-key-invalid');
       next.apiKeys = [key];
     }
     if (update.clearKey) next.apiKeys = [];
@@ -154,7 +154,7 @@ export class Translations {
       next.apiKeys = next.apiKeys.filter((key) => !update.removeKeyIds!.includes(digest(key).slice(0, 16)));
     for (const input of update.addKeys || []) {
       const key = input.trim();
-      if (!/^[A-Za-z0-9_-]{16,256}$/.test(key)) throw new ApiFailure(400, 'translation-key-invalid');
+      if (!validGeminiKey(key)) throw new ApiFailure(400, 'translation-key-invalid');
       if (!next.apiKeys.includes(key)) next.apiKeys.push(key);
     }
     if (next.apiKeys.length > 8) throw new ApiFailure(400, 'translation-too-many-keys');

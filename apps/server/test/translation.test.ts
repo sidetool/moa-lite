@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { subtitleDocument, batches } from '../src/translation/subtitle.js';
@@ -12,6 +12,8 @@ import { buildApp } from '../src/app.js';
 import { ApiFailure } from '../src/util.js';
 const vtt = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello\nworld\n\n00:00:04.000 --> 00:00:06.000\nGoodbye\n';
 const secret = 'test-key-not-a-real-key';
+const authKey = 'AQ.Ab' + 'x'.repeat(48); // Synthetic 53-character authorization key.
+const standardKey = 'AIza' + 'y'.repeat(35);
 const success = (lines: any[]) =>
   Response.json({
     candidates: [
@@ -149,6 +151,47 @@ test('Gemini uses fixed URL, header secret and strict complete cue IDs', async (
     (error) => error instanceof ApiFailure && error.error === 'translation-quota' && !error.message.includes(secret),
   );
 });
+test('Gemini auth and legacy keys survive configuration, restart and header-only requests', async () => {
+  const used: string[] = [];
+  const f = await fixture(async (url, init) => {
+    const key = new Headers(init?.headers).get('x-goog-api-key')!;
+    used.push(key);
+    assert.ok(!String(url).includes(key));
+    assert.ok(!String(init?.body).includes(key));
+    assert.equal(new Headers(init?.headers).get('authorization'), null);
+    if (!init?.body) return Response.json({ models: [{ name: 'models/gemini-flash-latest', supportedGenerationMethods: ['generateContent'] }] });
+    return fake(url, init);
+  });
+  try {
+    const config = f.service.configure({ clearKey: true, addKeys: ['  ' + authKey + '\t', standardKey, authKey] });
+    assert.equal(config.keys.length, 2);
+    for (const key of [authKey, standardKey]) assert.ok(!JSON.stringify(config).includes(key));
+    assert.deepEqual(JSON.parse(await readFile(path.join(f.dir, 'translation-secret.json'), 'utf8')).apiKeys, [authKey, standardKey]);
+    assert.equal((await stat(path.join(f.dir, 'translation-secret.json'))).mode & 0o777, 0o600);
+    for (const key of ['short', 'x'.repeat(257), 'AQ.Ab' + 'x '.repeat(24), authKey + '\r\nX-Test: invalid', authKey + '한글']) {
+      assert.throws(() => f.service.configure({ addKeys: [key] }), /translation-key-invalid/);
+    }
+    await f.service.close();
+    const restored = f.create();
+    try {
+      assert.equal(restored.config().keys.length, 2);
+      assert.equal(restored.config().enabled, true);
+      assert.deepEqual(await restored.models(), { models: ['gemini-flash-latest'] });
+      assert.equal((await wait(restored, restored.start('e', 'p', input).id)).state, 'completed');
+      restored.configure({ apiKey: standardKey });
+      await restored.models();
+    } finally { await restored.close(); }
+    // The original single-key disk format must also accept AQ. keys after restart.
+    const saved = JSON.parse(await readFile(path.join(f.dir, 'translation-secret.json'), 'utf8'));
+    delete saved.apiKeys;
+    await writeFile(path.join(f.dir, 'translation-secret.json'), JSON.stringify({ ...saved, apiKey: authKey }));
+    const single = f.create();
+    try { assert.equal(single.config().configured, true); await single.models(); }
+    finally { await single.close(); }
+    assert.deepEqual(used, [authKey, authKey, standardKey, authKey]);
+  } finally { await f.close(); }
+});
+
 test('shared work, cancellation isolation, durable cache and secret redaction', async () => {
   let calls = 0,
     release!: () => void;
@@ -303,10 +346,10 @@ test('routes enforce admin key writes, profile jobs, account assets and persist 
     const config = await env.app.inject({
       method: 'PATCH',
       url: '/api/admin/translation/config',
-      payload: { apiKey: secret, enabled: true },
+      payload: { apiKey: authKey, enabled: true },
     });
     assert.equal(config.statusCode, 200);
-    assert.ok(!config.body.includes(secret));
+    assert.ok(!config.body.includes(authKey));
     const limits = await env.app.inject({method:'PATCH',url:'/api/admin/translation/config',payload:{requestIntervalMs:0,retryCount:3}});
     assert.equal(limits.statusCode,200);assert.equal(limits.json().retryCount,3);
     for (const payload of [{requestIntervalMs:-1},{requestIntervalMs:60001},{retryCount:6},{retryCount:1.5}]) {

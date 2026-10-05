@@ -5,7 +5,7 @@ import { authenticate, handleAuth, AuthCache, sessionToken } from './auth.js';
 import { decrypt, encrypt } from './secrets.js';
 import { synchronize } from './sync.js';
 import { sourceHttp } from './network.js';
-import { Gemini, MODEL, validModel } from '../../../apps/server/src/translation/gemini.js';
+import { Gemini, MODEL, validModel, validGeminiKey } from '../../../apps/server/src/translation/gemini.js';
 import { convertSubtitle, createSubtitleClient } from '@moa/subtitles-ko';
 import { parseRepository } from '@moa/extensions';
 import { Jimaku } from '../../../apps/server/src/translation/jimaku.js';
@@ -153,8 +153,9 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
         if (Object.keys(input).some(k => !fields.includes(k))) throw new Error('invalid-request');
         if (input.model !== undefined && (typeof input.model !== 'string' || !validModel(input.model)) || input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new Error('invalid-request');
         for (const [name, min, max] of [['batchSize', 10, 300], ['requestIntervalMs', 0, 60000], ['retryCount', 0, 5]] as const) if (input[name] !== undefined && (!Number.isInteger(input[name]) || input[name] < min || input[name] > max)) throw new Error('invalid-request');
-        const additions = [...(input.apiKey ? [input.apiKey] : []), ...(input.addKeys ?? [])];
-        if (!Array.isArray(input.addKeys ?? []) || additions.some(k => typeof k !== 'string' || k.length < 16 || k.length > 256)) throw new Error('invalid-request');
+        if (!Array.isArray(input.addKeys ?? [])) throw new Error('invalid-request');
+        const additions = [...(input.apiKey !== undefined ? [input.apiKey] : []), ...(input.addKeys ?? [])].map(key => typeof key === 'string' ? key.trim() : key);
+        if (additions.some(key => !validGeminiKey(key))) throw new Error('translation-key-invalid');
         next.apiKeys = [...new Set([...(input.clearKey ? [] : next.apiKeys.filter((key: string) => !(input.removeKeyIds ?? []).includes(createHash('sha256').update(key).digest('hex').slice(0, 16)))), ...additions])];
         if (next.apiKeys.length > 8) throw new Error('translation-too-many-keys');
         for (const key of ['model', 'enabled', 'batchSize', 'requestIntervalMs', 'retryCount']) if (input[key] !== undefined) next[key] = input[key];
@@ -162,7 +163,7 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
         if (!await store.compareSet('secrets', secretsRow.revision, encrypt(secrets, secret))) throw new Error('storage-conflict');
         json(res, 200, translationView(next)); return;
       }
-      if (path === '/api/admin/translation/models') { admin(); const cfg = { ...defaultTranslation, ...secrets.translation }; if (!cfg.apiKeys.length) throw new Error('translation-not-configured'); json(res, 200, { models: await new Gemini().models(cfg.apiKeys[0], abort.signal) }); return; }
+      if (path === '/api/admin/translation/models') { admin(); const cfg = { ...defaultTranslation, ...secrets.translation }; if (!cfg.apiKeys.length) throw new Error('translation-not-configured'); json(res, 200, { models: await new Gemini(options.translationFetch).models(cfg.apiKeys[0], abort.signal) }); return; }
       if (path === '/api/lite/translate' && req.method === 'POST') {
         const cfg = { ...defaultTranslation, ...secrets.translation };
         if (!cfg.enabled) throw new Error('translation-disabled'); if (!cfg.apiKeys.length) throw new Error('translation-not-configured');
