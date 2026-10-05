@@ -47,6 +47,7 @@ node -e "console.log(require('node:crypto').randomBytes(8).toString('hex').toUpp
 | `ENABLE_EXPERIMENTAL_COREPACK` | 권장 | `1`. Vercel이 `package.json`의 pnpm 10.12.1을 쓰게 합니다. [안내](https://vercel.com/docs/package-managers) |
 | `APP_URL` | 선택 | 앱 origin(경로·끝 슬래시 없음). 비우면 Vercel의 Production 주소를 씁니다. 개인 도메인을 연결했다면 넣습니다. |
 | `AUTH_NAMESPACE` | 선택 | Redis 키 접두사. 기본 `moa-lite`. 같은 Redis를 여러 배포가 나눠 쓸 때만 바꿉니다. |
+| `CONNECTOR_CRX_KEY` | 선택 | 빌드용 비암호화 PKCS#8 PEM 개인키(P-256 또는 RSA 2048비트 이상, 실제 줄바꿈 유지). 지정하면 `APP_SECRET`보다 우선하며 키를 유지하면 확장 ID도 유지됩니다. 미지정 시 `APP_SECRET`에서 HKDF-SHA256으로 P-256 키를 파생하므로 비밀값을 바꾸면 ID도 바뀝니다. 둘 다 없으면 경고와 함께 고정 개발 전용 키를 씁니다. 개인키는 파일이나 로그에 기록하지 않습니다. |
 | `CONNECTOR_READER_ORIGINS` | 선택 | 연결 확장이 허용할 앱 origin 목록(쉼표 구분). 빌드할 때 반영됩니다. |
 | `BYEDPI_ENABLED` / `BYEDPI_STRATEGY` | 선택 | 기본 `1` / `tlsrec`. [내장 ByeDPI](#내장-byedpi-기본-켜짐) 참고 |
 | `UPSTASH_MANAGEMENT_*`, `UPSTASH_DATABASE_ID` | 선택 | 진단 메뉴의 실제 Upstash 사용량 조회. [진단 메뉴](#진단-메뉴와-실제-할당량-확인) 참고 |
@@ -127,12 +128,15 @@ ByeDPI가 바꾸는 것은 **Vercel에서 원본 사이트로 보내는 조회 �
 
 ## PC 연결 확장 (선택 사항)
 
-앱의 **설정 → 이 기기 → 연결 확장**(`/settings/connector`)에서 설치 상태를 보고, ZIP을 받고, 브라우저별 설치 순서를 따라 할 수 있습니다. 설치가 끝나면 이 화면이 새로고침 없이 **연결됨**으로 바뀝니다. 모든 배포에서 동일한 ZIP을 쓰며 다음 주소에서도 받을 수 있습니다.
+앱의 **설정 → 이 기기 → 연결 확장**(`/settings/connector`)에서 설치 상태를 보고, ZIP을 받고, 브라우저별 설치 순서를 따라 할 수 있습니다. 설치가 끝나면 이 화면이 새로고침 없이 **연결됨**으로 바뀝니다. Chromium ZIP과 CRX는 같은 공개키와 확장 ID를 쓰며 다음 주소에서도 받을 수 있습니다.
 
 - Chromium: `/install/moa-lite-connector-chromium.zip`
+- Chromium CRX3: `/install/moa-lite-connector-chromium.crx`
 - Firefox: `/install/moa-lite-connector-firefox.zip`
 
 Chrome·Edge에서는 ZIP을 풀고 `chrome://extensions` 또는 `edge://extensions`에서 개발자 모드를 켠 뒤 **압축해제된 확장 프로그램을 로드**하여 해당 폴더를 선택합니다. Firefox에서는 `about:debugging`의 임시 부가 기능 로드로 `manifest.json`을 선택할 수 있습니다. Firefox 임시 설치는 브라우저 재시작 후 다시 로드해야 합니다. Kiwi처럼 확장을 지원하는 Android Chromium 브라우저에서는 확장 메뉴의 개발자 모드에서 **+ (from .zip/.crx/.user.js)**로 Chromium ZIP을 압축을 풀지 않고 설치할 수 있습니다(브라우저별 확장 API 지원 차이로 동작은 보장하지 않습니다). 서명된 스토어 패키지는 포함하지 않습니다.
+
+Android Edge Canary에서는 CRX를 받아 **설정 → 개발자 옵션 → Extension install by crx**에서 선택합니다. 데스크톱 Chrome·Edge는 스토어 밖 CRX 설치를 차단하므로 기존 ZIP + 개발자 모드 설치를 사용합니다.
 
 설치 직후 확장의 설정 탭이 열리고, 열려 있는 탭 중 최근에 쓴 앱 주소가 맨 위에 나옵니다. **이 주소로 연결**을 누르거나 앱 주소를 직접 입력해 저장하세요. 앱 탭에서 확장 팝업을 열어 **이 탭 주소로 연결**해도 됩니다. 주소는 경로·끝 슬래시 없는 HTTPS origin이며 로컬 개발 주소만 HTTP를 허용합니다. 이미 열린 앱 탭에도 새로고침 없이 연결합니다. 팝업의 **주소 변경**으로 다른 배포에 연결할 수 있습니다.
 

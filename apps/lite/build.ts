@@ -3,10 +3,12 @@ import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { zipDirectory } from './zip.mjs';
+import { createCrxSigner } from './crx.js';
 import { createHash } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
 const require = createRequire(import.meta.url), root = resolve(import.meta.dirname, '../..');
 try { process.loadEnvFile(join(root, '.env')); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+const crxSigner = createCrxSigner(process.env);
 const nativeBinary = join(root, 'vendor/byedpi/ciadpi-linux-x64');
 if (createHash('sha256').update(await readFile(nativeBinary)).digest('hex') !== 'c70e87c6168af1832b21641a98bb53e3500b1daf6a5df8bfd22fac4a9294abda') throw new Error('ByeDPI binary checksum mismatch');
 await chmod(nativeBinary, 0o755);
@@ -37,12 +39,14 @@ for (const name of ['sql.js', 'quickjs-emscripten-core', '@jitl/quickjs-wasmfile
 await writeFile(join(output, 'THIRD_PARTY_LICENSES.txt'), notices.join('\n\n'));
 for (const target of ['chromium', 'firefox']) {
   const dir = join(root, '.state/extension', target); await mkdir(dir, { recursive: true });
-  const manifest = { manifest_version: 3, name: 'moa-lite Browser Connector', version: '0.1.0', description: 'MOA의 소스 조회와 직접 영상 재생을 브라우저에서 연결합니다.', permissions: ['activeTab', 'storage', 'scripting', 'webRequest', 'declarativeNetRequestWithHostAccess'],
+  const manifest = { ...(target === 'chromium' ? { key: crxSigner.manifestKey } : {}), manifest_version: 3, name: 'moa-lite Browser Connector', version: '0.1.0', description: 'MOA의 소스 조회와 직접 영상 재생을 브라우저에서 연결합니다.', permissions: ['activeTab', 'storage', 'scripting', 'webRequest', 'declarativeNetRequestWithHostAccess'],
     host_permissions: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'], background: target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] }, action: { default_popup: 'popup.html' } };
   await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   for (const name of ['background', 'content', 'popup']) await build({ entryPoints: [join(root, 'apps/lite/connector', name + '.js')], outfile: join(dir, name + '.js'), bundle: true, platform: 'browser', format: 'iife', target: 'es2022', minify: true });
   await copyFile(join(root, 'apps/lite/connector/popup.html'), join(dir, 'popup.html'));
   await copyFile(join(root, 'apps/lite/connector/popup.html'), join(dir, 'setup.html'));
-  await zipDirectory(dir, join(root, 'apps/web/public/install', 'moa-lite-connector-' + target + '.zip'));
+  const zipPath = join(root, 'apps/web/public/install', 'moa-lite-connector-' + target + '.zip');
+  await zipDirectory(dir, zipPath);
+  if (target === 'chromium') await writeFile(zipPath.replace(/\.zip$/, '.crx'), crxSigner.sign(await readFile(zipPath)));
 }
 await writeFile(join(root, 'apps/web/.env.production.local'), 'VITE_MOA_LITE=1\n');

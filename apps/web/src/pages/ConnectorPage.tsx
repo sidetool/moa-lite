@@ -70,9 +70,9 @@ function Steps({ browser }: { browser: Browser }) {
   const download = <a className="btn btn-primary btn-m" href={zip} download><Download size={16} /><span>확장 받기</span></a>;
   const connect = <li>설치하면 열리는 창에서 <b>이 탭 주소로 연결</b>을 누르거나, 아래 앱 주소를 붙여 넣어요. 끝나면 이 화면이 <b>연결됨</b>으로 바뀌어요.</li>;
   if (browser === 'android') return <ol className="remote-steps">
-    <li>확장 파일을 받아요. 압축은 풀지 않아도 돼요. {download}</li>
+    <li>확장 파일을 받아요. 압축은 풀지 않아도 돼요. {download} <a className="btn btn-primary btn-m" href="/install/moa-lite-connector-chromium.crx" download><Download size={16} /><span>CRX 받기</span></a></li>
     <li>브라우저 메뉴에서 <b>확장 프로그램</b>을 열고 <b>개발자 모드</b>를 켜요.</li>
-    <li><b>+ (from .zip/.crx/.user.js)</b>를 누르고 받은 ZIP 파일을 골라요.</li>
+    <li><b>+ (from .zip/.crx/.user.js)</b>를 누르고 받은 ZIP 파일을 골라요.<p>Edge Canary: 설정 → 개발자 옵션 → Extension install by crx로 받은 CRX 파일을 골라요.</p></li>
     {connect}
   </ol>;
   if (browser === 'firefox') return <ol className="remote-steps">
