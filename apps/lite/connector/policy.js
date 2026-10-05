@@ -36,6 +36,13 @@ export function requestSpec(input, image = false) {
   return { url: url.href, origin: url.origin, method, headers, special, body: input.body,
     ...policy, maximum: image ? limits.image : limits.http, image };
 }
-export function isReader(sender, origins) {
-  try { return sender.frameId === 0 && Number.isInteger(sender.tab?.id) && origins.includes(new URL(sender.url).origin); } catch { return false; }
+export function isReader(sender, origin) {
+  try { return sender.frameId === 0 && Number.isInteger(sender.tab?.id) && !!origin && new URL(sender.url).origin === origin; } catch { return false; }
+}
+
+export function appOrigin(value) {
+  if (typeof value !== 'string') throw new Error('invalid_app_origin');
+  let url; try { url = new URL(value); } catch { throw new Error('invalid_app_origin'); }
+  if (value !== url.origin || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('invalid_app_origin');
+  return url.origin;
 }

@@ -1,3 +1,4 @@
+export { getConnectorStatus, onConnectorStatusChange, type ConnectorStatus } from './connector';
 import { PROFILE_HEADER, type Account } from '@moa/shared';
 import { accountLock, readState, writeState } from './storage';
 import { connectorAvailable, connectorHttp, prepareMedia, releaseMedia, releaseAllMedia } from './connector';
@@ -48,7 +49,7 @@ async function serveHost(data: any, owner: Worker) {
       const installed = await connectorAvailable();
       if (installed) {
         try { value = await connectorHttp(data.input, abort.signal); }
-        catch (error) { if (['connector_permission_required', 'connector_not_installed', 'connector_header_unsupported'].includes((error as Error).message)) value = await cloud('/lite/http', data.input, undefined, abort.signal); else throw error; }
+        catch (error) { if (['host_permission_missing', 'connector_permission_required', 'connector_not_installed', 'connector_header_unsupported'].includes((error as Error).message)) value = await cloud('/lite/http', data.input, undefined, abort.signal); else throw error; }
       } else value = await cloud('/lite/http', data.input, undefined, abort.signal);
     } else throw new Error('invalid-host-method');
     if (worker === owner) owner.postMessage({ type: 'host-reply', id: data.id, value });

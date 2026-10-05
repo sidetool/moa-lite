@@ -4,14 +4,16 @@ import { runInNewContext } from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import { build } from 'esbuild';
 
-test('packaged connector removes playback rules on stop, disconnect and cancellation during rule installation', async () => {
-  const { outputFiles } = await build({ entryPoints: [new URL('../connector/background.js', import.meta.url).pathname], bundle: true, write: false, format: 'iife', platform: 'browser', define: { __READER_ORIGINS__: '["https://moa.example.org"]' } });
+test('packaged connector removes playback rules on stop, disconnect and cancellation during rule installation', { timeout: 5000 }, async () => {
+  const { outputFiles } = await build({ entryPoints: [new URL('../connector/background.js', import.meta.url).pathname], bundle: true, write: false, format: 'iife', platform: 'browser' });
   const rules = new Map<number, any>([[41, { id: 41 }]]), replies = new Map<string, any>();
+  let origin = 'https://moa.example.org', storageChanged: any;
   let connect: any, message: any, disconnect: any, release: (() => void) | undefined, hold = false;
   const api = {
-    runtime: { getURL: (path: string) => 'chrome-extension://fixture/' + path, onConnect: { addListener: (fn: any) => { connect = fn; } }, onMessage: { addListener() {} } },
-    permissions: { contains: async () => true },
-    storage: { local: { get: async () => ({}), set: async () => {} } },
+    runtime: { getURL: (path: string) => 'chrome-extension://fixture/' + path, onInstalled: { addListener() {} }, onStartup: { addListener() {} }, onConnect: { addListener: (fn: any) => { connect = fn; } }, onMessage: { addListener() {} } },
+    tabs: { query: async () => [], onUpdated: { addListener() {} } }, scripting: {},
+    permissions: { onAdded: { addListener() {} }, onRemoved: { addListener() {} }, contains: async () => true },
+    storage: { onChanged: { addListener: (fn: any) => { storageChanged = fn; } }, local: { get: async () => ({ appOrigin: origin }), set: async () => {} } },
     declarativeNetRequest: {
       getSessionRules: async () => [...rules.values()],
       updateSessionRules: async ({ addRules = [], removeRuleIds = [] }: any) => {
@@ -23,7 +25,7 @@ test('packaged connector removes playback rules on stop, disconnect and cancella
   };
   runInNewContext(outputFiles![0].text, { chrome: api, crypto: webcrypto, URL, setTimeout, clearTimeout, TextDecoder, Uint8Array, atob });
   const port = { name: 'moa-lite-connector-v1', sender: { url: 'https://moa.example.org/', frameId: 0, tab: { id: 17 } }, postMessage: (value: any) => replies.set(value.id, value), disconnect() {}, onMessage: { addListener: (fn: any) => { message = fn; } }, onDisconnect: { addListener: (fn: any) => { disconnect = fn; } } };
-  connect(port);
+  await connect(port);
   const begin = (id: string) => message({ id, type: 'playback-begin', sessionId: id, request: { url: 'https://cdn.example.org/video.mp4', headers: { Referer: 'https://source.example.org/' } } });
   try {
     await Promise.all([begin('one'), begin('two')]);
@@ -31,10 +33,14 @@ test('packaged connector removes playback rules on stop, disconnect and cancella
     for (const rule of rules.values()) assert.equal(rule.condition.tabIds[0], 17);
     await message({ id: 'stop', type: 'playback-end', sessionId: 'one' }); assert.equal(rules.size, 1);
     disconnect(); await new Promise(resolve => setImmediate(resolve)); assert.equal(rules.size, 0);
-    connect(port); hold = true;
+    await connect(port); hold = true;
     const installing = begin('cancelled');
     while (!release) await new Promise(resolve => setImmediate(resolve));
     await message({ id: 'cancel', type: 'cancel', requestId: 'cancelled' }); release(); await installing;
     assert.equal(replies.get('cancelled').error, 'connector_cancelled'); assert.equal(rules.size, 0);
+    hold = false; await begin('address-change'); assert.equal(rules.size, 1);
+    origin = 'https://next.example.org'; storageChanged({ appOrigin: {} }, 'local');
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(rules.size, 0);
+    await message({ id: 'old-reader', type: 'hello' }); assert.equal(replies.get('old-reader').error, 'permission_denied');
   } finally { disconnect(); }
 });

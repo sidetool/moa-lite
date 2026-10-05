@@ -9,7 +9,7 @@ export async function boundedFetch(spec, requestId) {
   try {
     const response = await fetch(spec.url, { method: spec.method, headers: spec.headers, body: spec.body,
       referrer: spec.inTab && spec.special?.referer && new URL(spec.special.referer).origin === location.origin ? spec.special.referer : undefined,
-      credentials: 'include', redirect: 'manual', cache: 'no-store', signal: abort.signal });
+      credentials: spec.login === true ? 'include' : 'omit', redirect: 'manual', cache: 'no-store', signal: abort.signal });
     if (response.type === 'opaqueredirect') return { opaqueRedirect: true, statusCode: 0, headers: {}, bytes: '', size: 0 };
     let type = response.headers.get('content-type') ?? '';
     if (spec.image && !response.ok && ![301,302,303,307,308].includes(response.status))

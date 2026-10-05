@@ -1,4 +1,24 @@
-let available: boolean | undefined;
+export type ConnectorStatus = { installed: boolean; version?: string; hostPermission?: boolean };
+let status: ConnectorStatus = { installed: false };
+let checking: Promise<ConnectorStatus> | undefined;
+const subscribers = new Set<(status: ConnectorStatus) => void>();
+function publish(next: ConnectorStatus) {
+  if (JSON.stringify(next) === JSON.stringify(status)) return;
+  status = next;
+  for (const cb of subscribers) cb({ ...status });
+}
+export function onConnectorStatusChange(cb: (status: ConnectorStatus) => void) { subscribers.add(cb); return () => { subscribers.delete(cb); }; }
+export function getConnectorStatus(): Promise<ConnectorStatus> {
+  return checking ??= connectorCall('hello', {}, undefined, 500).then(value => {
+    publish({ installed: true, version: String(value.version), hostPermission: value.hostPermission === true }); return { ...status };
+  }, () => { publish({ installed: false }); return { ...status }; }).finally(() => { checking = undefined; });
+}
+window.addEventListener('message', event => {
+  if (event.source !== window || event.origin !== location.origin) return;
+  if (event.data?.channel === 'moa-lite-connector-ready-v1') void getConnectorStatus().then(value => { if (!value.installed) void getConnectorStatus(); });
+  if (event.data?.channel === 'moa-lite-connector-disconnected-v1') publish({ installed: false });
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void getConnectorStatus(); });
 let sequence = 0;
 const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 window.addEventListener('message', event => {
@@ -18,9 +38,7 @@ export function connectorCall(type: string, args: any = {}, signal?: AbortSignal
   });
 }
 export async function connectorAvailable() {
-  if (available !== undefined) return available;
-  try { await connectorCall('hello', {}, undefined, 300); available = true; } catch { available = false; }
-  return available;
+  return status.installed || (await getConnectorStatus()).installed;
 }
 export async function connectorHttp(input: any, signal?: AbortSignal) {
   const { token } = await connectorCall('begin', { action: 'videos' }, signal);

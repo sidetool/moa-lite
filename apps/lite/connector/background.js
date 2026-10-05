@@ -4,8 +4,9 @@ import { sourceUrl, requestSpec, isReader, limits } from './policy.js';
 import { boundedFetch, cancelFetch } from './fetch.js';
 import { mediaRules, playlistUrls } from './media-rules.js';
 const api = globalThis.browser ?? chrome;
-const readers = __READER_ORIGINS__;
+import { createRegistration } from './registration.js';
 const sessions = new Set();
+const registration = createRegistration(api, origin => { for (const state of sessions) if (!isReader(state.sender, origin)) state.disconnect(); });
 const responseObservers = new Set();
 // Register once at service-worker startup. Per-request registration can race the
 // network process and lose the first redirect's otherwise opaque headers.
@@ -26,7 +27,7 @@ function remember(origin, denied = false) {
   return pendingQueue;
 }
 async function permission(origin) {
-  if (!await api.permissions.contains({ origins: [origin + '/*'] })) { await remember(origin); throw new Error('connector_permission_required'); }
+  if (!await api.permissions.contains({ origins: [origin + '/*'] })) { throw new Error('host_permission_missing'); }
 }
 function transport(spec, requestId, state) { return followSourceRedirects(spec, next => transportHop(next, requestId, state)); }
 const hopQueues = new Map();
@@ -44,9 +45,10 @@ function transportHop(spec, requestId, state) {
 async function transportHopOnce(spec, requestId, state) {
   await ready; await permission(spec.origin);
   for (const key of ['referer','origin']) if (spec.special[key]) await permission(new URL(spec.special[key]).origin);
-  const { authTabs = {} } = await api.storage.local.get('authTabs');
+  const { authTabs = {}, loginOrigins = [] } = await api.storage.local.get(['authTabs', 'loginOrigins']);
+  spec = { ...spec, login: loginOrigins.includes(spec.origin) };
   let authTab;
-  if (Number.isInteger(authTabs[spec.origin])) {
+  if (spec.login && Number.isInteger(authTabs[spec.origin])) {
     try { const tab = await api.tabs.get(authTabs[spec.origin]); if (new URL(tab.url).origin === spec.origin) authTab = tab.id; } catch {}
   }
   const check = () => { if (state.cancelled || state.cancelledIds.has(requestId)) throw new Error('connector_cancelled'); };
@@ -99,10 +101,10 @@ async function transportHopOnce(spec, requestId, state) {
 }
 function stop(state) { state.cancelled = true; for (const op of state.operations.values()) op.cancel(); }
 api.runtime.onConnect.addListener(port => {
-  if (port.name !== 'moa-lite-connector-v1' || !isReader(port.sender, readers)) { port.disconnect(); return; }
+  if (port.name !== 'moa-lite-connector-v1') { port.disconnect(); return; }
   const jobs = new Map(), operations = new Map(), inflight = new Set();
   const media = new Map();
-  const state = { operations, cancelledIds: new Set(), cancelled: false }; sessions.add(state);
+  const state = { sender: port.sender, disconnect: () => { cleanup(); port.disconnect(); }, operations, cancelledIds: new Set(), cancelled: false }; sessions.add(state);
   const send = value => { try { port.postMessage(value); } catch {} };
   function end(token) { const job = jobs.get(token); if (job) { stop(job); clearTimeout(job.timer); jobs.delete(token); } }
   async function endMedia(id) {
@@ -110,14 +112,21 @@ api.runtime.onConnect.addListener(port => {
     media.delete(id); clearTimeout(value.timer);
     await api.declarativeNetRequest.updateSessionRules({ removeRuleIds: value.ids }).catch(() => {});
   }
-  port.onDisconnect.addListener(() => { stop(state); for (const key of jobs.keys()) end(key); for (const id of media.keys()) void endMedia(id); sessions.delete(state); });
+  function cleanup() { stop(state); for (const key of jobs.keys()) end(key); for (const id of media.keys()) void endMedia(id); sessions.delete(state); }
+  port.onDisconnect.addListener(cleanup);
+  void registration.ready().then(() => {
+    if (state.cancelled || !isReader(port.sender, registration.origin)) state.disconnect();
+    else send({ type: 'ready', version: '0.1.0' });
+  });
   port.onMessage.addListener(async message => {
+    await registration.ready();
     const { id, type } = message ?? {};
     if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id) || inflight.has(id) || inflight.size >= 16) return;
     inflight.add(id);
     try {
       let value;
-      if (type === 'hello') value = { version: 1, name: 'moa-lite Browser Connector', appVersion: '0.1.0', capabilities: ['http-head-range-user-agent', 'tab-playback-rules'] };
+      if (state.cancelled || !isReader(port.sender, registration.origin)) throw new Error('permission_denied');
+      if (type === 'hello') value = { version: '0.1.0', origin: registration.origin, hostPermission: await api.permissions.contains({ origins: ['https://*/*'] }) };
       else if (type === 'cancel') { const target = jobs.get(message.token) ?? state; if (inflight.has(message.requestId)) { target.cancelledIds.add(message.requestId); target.operations.get(message.requestId)?.cancel(); } value = { ok: true }; }
       else if (type === 'end') { end(message.token); value = { ok: true }; }
       else if (type === 'begin') {
@@ -172,15 +181,15 @@ api.runtime.onConnect.addListener(port => {
     finally { inflight.delete(id); state.cancelledIds.delete(id); }
   });
 });
-// Configuration messages only from the packaged popup, never a website content script.
+// Only packaged setup/popup pages may opt into authenticated source tabs.
 api.runtime.onMessage.addListener((message, sender, respond) => {
-  if (sender.tab || sender.url !== api.runtime.getURL('popup.html') || message?.type !== 'open-auth') return;
+  if (![api.runtime.getURL('popup.html'), api.runtime.getURL('setup.html')].includes(sender.url) || message?.type !== 'open-auth') return;
   (async () => {
     const url = sourceUrl(message.origin); await permission(url.origin);
     const tab = await api.tabs.create({ url: url.origin + '/', active: true });
-    const { authTabs = {} } = await api.storage.local.get('authTabs');
+    const { authTabs = {}, loginOrigins = [] } = await api.storage.local.get(['authTabs', 'loginOrigins']);
     authTabs[url.origin] = tab.id;
-    await api.storage.local.set({ authTabs }); return { ok: true };
+    await api.storage.local.set({ authTabs, loginOrigins: [...new Set([...loginOrigins, url.origin])] }); return { ok: true };
   })().then(respond, () => respond({ error: 'connector_failed' }));
   return true;
 });

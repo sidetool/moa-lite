@@ -35,16 +35,14 @@ for (const name of ['sql.js', 'quickjs-emscripten-core', '@jitl/quickjs-wasmfile
   notices.push(name + '\n' + license);
 }
 await writeFile(join(output, 'THIRD_PARTY_LICENSES.txt'), notices.join('\n\n'));
-const configured = process.env.CONNECTOR_READER_ORIGINS || process.env.APP_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://127.0.0.1:5180');
-const origins = configured.split(',').map(value => { const url = new URL(value.trim()); if (url.origin !== value.trim() || !['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid connector origin'); return url.origin; });
 for (const target of ['chromium', 'firefox']) {
   const dir = join(root, '.state/extension', target); await mkdir(dir, { recursive: true });
-  const manifest = { manifest_version: 3, name: 'moa-lite Browser Connector', version: '0.1.0', description: 'MOA의 소스 조회와 직접 영상 재생을 브라우저에서 연결합니다.', permissions: ['storage', 'scripting', 'webRequest', 'declarativeNetRequestWithHostAccess'],
-    host_permissions: origins.map(value => value + '/*'), optional_host_permissions: ['https://*/*'], background: target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] }, action: { default_popup: 'popup.html' },
-    content_scripts: [{ matches: origins.map(value => value + '/*'), js: ['content.js'], run_at: 'document_start', all_frames: false }] };
+  const manifest = { manifest_version: 3, name: 'moa-lite Browser Connector', version: '0.1.0', description: 'MOA의 소스 조회와 직접 영상 재생을 브라우저에서 연결합니다.', permissions: ['activeTab', 'storage', 'scripting', 'webRequest', 'declarativeNetRequestWithHostAccess'],
+    host_permissions: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'], background: target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] }, action: { default_popup: 'popup.html' } };
   await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  for (const name of ['background', 'content', 'popup']) await build({ entryPoints: [join(root, 'apps/lite/connector', name + '.js')], outfile: join(dir, name + '.js'), bundle: true, platform: 'browser', format: 'iife', target: 'es2022', minify: true, define: { __READER_ORIGINS__: JSON.stringify(origins) } });
+  for (const name of ['background', 'content', 'popup']) await build({ entryPoints: [join(root, 'apps/lite/connector', name + '.js')], outfile: join(dir, name + '.js'), bundle: true, platform: 'browser', format: 'iife', target: 'es2022', minify: true });
   await copyFile(join(root, 'apps/lite/connector/popup.html'), join(dir, 'popup.html'));
+  await copyFile(join(root, 'apps/lite/connector/popup.html'), join(dir, 'setup.html'));
   await zipDirectory(dir, join(root, 'apps/web/public/install', 'moa-lite-connector-' + target + '.zip'));
 }
 await writeFile(join(root, 'apps/web/.env.production.local'), 'VITE_MOA_LITE=1\n');
