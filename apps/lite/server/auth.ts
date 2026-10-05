@@ -18,21 +18,49 @@ export async function authDatabase(encoded?: string) {
   (migrate as any)(db, { users: [] }, Date.now);
   return db;
 }
-const sessionIndexes = new WeakMap<DocumentStore, { encoded: string; sessions: Map<string, any> }>();
-export async function authenticate(store: DocumentStore, req: IncomingMessage) {
-  const token = /(?:^|;\s*)(?:__Host-)?moa_session=([\w-]{43})(?:;|$)/.exec(req.headers.cookie ?? '')?.[1];
-  if (!token) return null;
-  const state = await store.get('auth'); if (!state.value) return null;
-  let index = sessionIndexes.get(store);
-  if (index?.encoded !== state.value) {
-    const db = await authDatabase(state.value);
-    try {
-      const rows = db.prepare(`SELECT a.id,a.username,a.role,s.token_hash,s.expires FROM accounts a JOIN sessions s ON s.account_id=a.id WHERE a.disabled=0`).all();
-      index = { encoded: state.value, sessions: new Map(rows.map((row: any) => [String(row.token_hash), row])) };
-      sessionIndexes.set(store, index);
-    } finally { db.close(); }
+export function sessionToken(req: IncomingMessage) {
+  return /(?:^|;\s*)(?:__Host-)?moa_session=([\w-]{43})(?:;|$)/.exec(req.headers.cookie ?? '')?.[1];
+}
+/** One cache per application instance. A generation prevents in-flight reads restoring revoked state. */
+export class AuthCache {
+  private generation = 0;
+  private checkedAt = -Infinity;
+  private encoded: string | null = null;
+  private sessions = new Map<string, any>();
+  private pending?: Promise<void>;
+  invalidate() { this.generation++; this.checkedAt = -Infinity; }
+  async read(store: DocumentStore) {
+    while (Date.now() - this.checkedAt >= 30_000) {
+      if (!this.pending) {
+        const generation = this.generation, started = Date.now();
+        this.pending = (async () => {
+          const state = await store.get('auth');
+          let sessions = this.sessions;
+          if (state.value !== this.encoded) {
+            sessions = new Map();
+            if (state.value) {
+              const db = await authDatabase(state.value);
+              try {
+                const rows = db.prepare(`SELECT a.id,a.username,a.role,s.token_hash,s.expires FROM accounts a JOIN sessions s ON s.account_id=a.id WHERE a.disabled=0`).all();
+                sessions = new Map(rows.map((row: any) => [String(row.token_hash), row]));
+              } finally { db.close(); }
+            }
+          }
+          if (generation === this.generation) {
+            this.encoded = state.value; this.sessions = sessions; this.checkedAt = started;
+          }
+        })().finally(() => { this.pending = undefined; });
+      }
+      await this.pending;
+    }
+    return this.sessions;
   }
-  const session = index!.sessions.get(createHash('sha256').update(token).digest('hex'));
+}
+export async function authenticate(store: DocumentStore, req: IncomingMessage, cache: AuthCache) {
+  const token = sessionToken(req);
+  if (!token) return null;
+  const sessions = await cache.read(store);
+  const session = sessions.get(createHash('sha256').update(token).digest('hex'));
   if (!session || session.expires <= Date.now()) return null;
   const { expires, ...actor } = session; return actor;
 }

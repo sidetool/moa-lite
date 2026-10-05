@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { RedisDocuments, MemoryDocuments, updateDocument, type DocumentStore } from './documents.js';
-import { authenticate, handleAuth } from './auth.js';
+import { authenticate, handleAuth, AuthCache, sessionToken } from './auth.js';
 import { decrypt, encrypt } from './secrets.js';
 import { synchronize } from './sync.js';
 import { sourceHttp } from './network.js';
@@ -14,6 +14,7 @@ import { Catalog } from '../../../apps/server/src/catalog.js';
 import { SqliteDatabase } from '../sqlite.js';
 import { sqlite } from './auth.js';
 import { RuntimeDiagnostics, createQuotaReader, vercelLimits } from './diagnostics.js';
+import { InstanceRateLimiter } from './rate-limit.js';
 const MAX_BODY = 4_000_000;
 function json(res: ServerResponse, status: number, value: any) {
   const body = JSON.stringify(value);
@@ -40,7 +41,17 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
   const origin = options.origin ?? process.env.APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://127.0.0.1:5180');
   const allowedOrigins = [...new Set([origin, ...[process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL].filter(Boolean).map(host => `https://${host}`)])];
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL, redisToken = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  const store = options.store ?? (redisUrl && redisToken ? new RedisDocuments(redisUrl, redisToken, process.env.AUTH_NAMESPACE ?? 'moa-lite') : options.dev ? new MemoryDocuments() : null);
+  const backingStore = options.store ?? (redisUrl && redisToken ? new RedisDocuments(redisUrl, redisToken, process.env.AUTH_NAMESPACE ?? 'moa-lite') : options.dev ? new MemoryDocuments() : null);
+  const authCache = new AuthCache(), limiter = new InstanceRateLimiter();
+  const store: DocumentStore | null = backingStore && {
+    get: key => backingStore.get(key),
+    rate: (key, limit, seconds) => backingStore.rate(key, limit, seconds),
+    async compareSet(key, revision, value, ttl) {
+      if (key === 'auth') authCache.invalidate();
+      try { return await backingStore.compareSet(key, revision, value, ttl); }
+      finally { if (key === 'auth') authCache.invalidate(); }
+    },
+  };
   const missing = [...(secret.length < 32 ? ['APP_SECRET'] : []), ...(!/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/i.test(setupCode) ? ['SETUP_CODE'] : []), ...(!store ? ['UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN'] : [])];
   const diagnostics = new RuntimeDiagnostics(), quotas = createQuotaReader();
   return { store, async handle(req: IncomingMessage, res: ServerResponse) {
@@ -62,18 +73,32 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
         }
         await handleAuth(store, req, res, raw, { secret, setupCode, origin, allowedOrigins }); return;
       }
-      const actor = await authenticate(store, req);
+      if (path === '/api/lite/image' && req.method === 'GET') {
+        if (!sessionToken(req)) { json(res, 401, { error: 'login-required' }); return; }
+        const ticket = url.searchParams.get('ticket');
+        let image;
+        try { image = ticket ? decrypt(ticket, secret) : null; }
+        catch { throw Object.assign(new Error('invalid-image-ticket'), { statusCode: 403 }); }
+        if (!image || typeof image.accountId !== 'string' || !Number.isFinite(image.expires) || image.expires <= Date.now()) {
+          throw Object.assign(new Error('image-expired'), { statusCode: 403 });
+        }
+        const wire = await (options.transport ?? sourceHttp)({url:image.url,headers:image.headers}, abort.signal);
+        if (wire.statusCode !== 200 || !/^image\/(?:png|jpe?g|webp|gif|avif|bmp|x-icon)(?:;|$)/i.test(wire.contentType)) throw new Error('invalid-image');
+        res.writeHead(200, { 'Content-Type': wire.contentType, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
+        res.end(Buffer.from(wire.bytes, 'base64')); return;
+      }
+      const actor = await authenticate(store, req, authCache);
       if (!actor) { json(res, 401, { error: 'login-required' }); return; }
       let input: any = {}; if (raw.length) { try { input = JSON.parse(raw.toString('utf8')); } catch { json(res, 400, { error: 'invalid-json' }); return; } }
       const admin = () => { if (actor.role !== 'admin') throw Object.assign(new Error('admin-required'), { statusCode: 403 }); };
       if (path === '/api/lite/diagnostics' && req.method === 'GET') {
         admin();
-        if (!await store.rate(`diagnostics:${actor.id}`, 30, 60)) { json(res, 429, { error: 'rate-limited' }); return; }
+        if (!limiter.rate(`diagnostics:${actor.id}`, 30, 60)) { json(res, 429, { error: 'rate-limited' }); return; }
         json(res, 200, { limitsCheckedAt: '2026-10-05', vercel: { status: 'dashboard-only', metrics: vercelLimits, dashboard: 'https://vercel.com/dashboard/usage' },
           upstash: await quotas(), runtime: diagnostics.snapshot(), byedpi: { enabled: process.env.BYEDPI_ENABLED !== '0', strategy: process.env.BYEDPI_STRATEGY ?? 'tlsrec' } }); return;
       }
       if (path === '/api/me') { json(res, 200, { id: actor.id, username: actor.username, role: actor.role }); return; }
-      if (!await store.rate(`api:${actor.id}`, 3000, 3600)) { json(res, 429, { error: 'rate-limited' }); return; }
+      if (!limiter.rate(`api:${actor.id}`, 3000, 3600)) { json(res, 429, { error: 'rate-limited' }); return; }
       if (path === '/api/lite/sync' && req.method === 'POST') {
         if (input.accountId !== undefined && input.accountId !== actor.id) { json(res, 401, { error: 'account-changed' }); return; }
         if (input.sharedRevision !== undefined && (!Number.isSafeInteger(input.sharedRevision) || input.sharedRevision < 0)) throw new Error('invalid-sync');
@@ -192,15 +217,6 @@ export function createLiteApplication(options: { store?: DocumentStore; secret?:
           return {url: '/api/lite/image?ticket=' + encodeURIComponent(encrypt({...image, accountId:actor.id, expires},secret)), expires};
         });
         json(res,200,tickets); return;
-      }
-      if (path === '/api/lite/image' && req.method === 'GET') {
-        const ticket = url.searchParams.get('ticket');
-        const image = ticket ? decrypt(ticket, secret) : { url: url.searchParams.get('url'), headers: url.searchParams.get('referer') ? { Referer: url.searchParams.get('referer') } : {} };
-        if (ticket && (image.accountId !== actor.id)) throw Object.assign(new Error('image-expired'), {statusCode:403});
-        const wire = await (options.transport ?? sourceHttp)({url:image.url,headers:image.headers}, abort.signal);
-        if (wire.statusCode !== 200 || !/^image\/(?:png|jpe?g|webp|gif|avif|bmp|x-icon)(?:;|$)/i.test(wire.contentType)) throw new Error('invalid-image');
-        res.writeHead(200, { 'Content-Type': wire.contentType, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
-        res.end(Buffer.from(wire.bytes, 'base64')); return;
       }
       json(res, 404, { error: 'not-found' });
     } catch (error: any) {

@@ -9,7 +9,7 @@ const cas = `local old=redis.call('GET',KEYS[1]); local rev=0; if old then rev=c
 if rev~=tonumber(ARGV[1]) then return 0 end
 redis.call('SET',KEYS[1],ARGV[2]); if tonumber(ARGV[3])>0 then redis.call('EXPIRE',KEYS[1],ARGV[3]) end; return 1`;
 const rate = `local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[2]) end; return n<=tonumber(ARGV[1]) and 1 or 0`;
-// Validate on Redis every time (including revocations/expiry). Only omit unchanged response bytes.
+// Each get validates on Redis; the application auth cache can skip get for up to 30 seconds.
 const readCached = `local cached=redis.call('GET',KEYS[1]); if not cached then return '' end
 if redis.sha1hex(cached)==ARGV[1] then return false end; return cached`;
 export class RedisDocuments implements DocumentStore {
