@@ -1,3 +1,4 @@
+import { selectPlaybackStream } from './playback-streams.js';
 import { mergeBackground } from './background-state.js';
 import { inlineSubtitle, remoteMediaType, subtitleVtt } from '../../../apps/server/src/remote-media.js';
 import './globals.js';
@@ -174,9 +175,11 @@ async function startJob(id: string, pid: string, body: any) {
 }
 async function playback(pid: string, body: any): Promise<PlaybackSession> {
   const ep = episode(body.episodeId); catalog.kids.assert(ep.media_id, pid);
-  const videos = await sources.videos(body.episodeId);
-  const index = body.streamId === undefined ? 0 : Number(body.streamId), item = videos[index];
-  if (!item || item.url.startsWith('edl://') || !/^https:\/\//.test(item.url)) throw new ApiFailure(502, 'unsupported-video-format');
+  const videos = await sources.videos(body.episodeId).catch(error => {
+    if (error?.message === 'source_browser_unavailable' || error?.statusCode < 500) throw error;
+    throw new ApiFailure(502, 'source-video-extraction-failed');
+  });
+  const { item, streamId, streams } = selectPlaybackStream(videos, body.streamId);
   const detail = catalog.detail(ep.media_id, pid), list = detail.seasons.flatMap(s => s.episodes), next = list[list.findIndex(e => e.id === ep.id) + 1];
   const live = !!sources.row(sources.remoteEpisode(ep.id)!.source_id).live;
   const subtitles: any[] = [];
@@ -197,7 +200,7 @@ async function playback(pid: string, body: any): Promise<PlaybackSession> {
   }
   for (const row of db.all('SELECT * FROM online_subtitles WHERE episode_id=?', ep.id)) subtitles.push(track(row.content, row.format, { id: row.id, label: row.creator_name + ' · 한국어', lang: 'ko', source: 'online', provenance: { creatorName: row.creator_name, sourceUrl: row.source_url } }));
   for (const row of db.all('SELECT payload FROM lite_jobs WHERE episode=? AND profile=?', ep.id, pid)) { const view = jobView(JSON.parse(row.payload)); if (view.track) subtitles.push(view.track); }
-  const session: PlaybackSession = { sessionId: randomUUID(), episodeId: ep.id, mediaId: detail.id, mediaTitle: detail.title, mediaType: playbackMediaType(db, detail.id, detail.type), episodeTitle: ep.title, episodeLabel: `S${ep.season}:E${ep.number}`, mode: 'direct', url: item.url, mime: remoteMediaType(item.url), headers: item.headers ?? {}, transport: 'direct', live, duration: ep.duration || 0, streams: videos.map((v, i) => ({ id: String(i), label: v.quality || `서버 ${i + 1}` })), streamId: String(index), startPosition: live ? 0 : body.startPosition ?? (list.find(e => e.id === ep.id)?.progress?.completed ? 0 : list.find(e => e.id === ep.id)?.progress?.position ?? 0), subtitles, audioTracks: [], next: !live && next ? { episodeId: next.id, title: detail.title, label: next.title, thumb: next.thumb } : null };
+  const session: PlaybackSession = { sessionId: randomUUID(), episodeId: ep.id, mediaId: detail.id, mediaTitle: detail.title, mediaType: playbackMediaType(db, detail.id, detail.type), episodeTitle: ep.title, episodeLabel: `S${ep.season}:E${ep.number}`, mode: 'direct', url: item.url, mime: remoteMediaType(item.url), headers: item.headers ?? {}, transport: 'direct', live, duration: ep.duration || 0, streams, streamId, startPosition: live ? 0 : body.startPosition ?? (list.find(e => e.id === ep.id)?.progress?.completed ? 0 : list.find(e => e.id === ep.id)?.progress?.position ?? 0), subtitles, audioTracks: [], next: !live && next ? { episodeId: next.id, title: detail.title, label: next.title, thumb: next.thumb } : null };
   sessions.set(session.sessionId, session); return session;
 }
 async function dispatch(path: string, method: string, body: any, pid: string | null): Promise<any> {
