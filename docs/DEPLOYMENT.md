@@ -132,7 +132,7 @@ ByeDPI가 바꾸는 것은 **Vercel에서 원본 사이트로 보내는 조회 �
 - Chromium: `/install/moa-lite-connector-chromium.zip`
 - Firefox: `/install/moa-lite-connector-firefox.zip`
 
-Chrome·Edge에서는 ZIP을 풀고 `chrome://extensions` 또는 `edge://extensions`에서 개발자 모드를 켠 뒤 **압축해제된 확장 프로그램을 로드**하여 해당 폴더를 선택합니다. Firefox에서는 `about:debugging`의 임시 부가 기능 로드로 `manifest.json`을 선택할 수 있습니다. Firefox 임시 설치는 브라우저 재시작 후 다시 로드해야 합니다. 서명된 스토어 패키지는 포함하지 않습니다.
+Chrome·Edge에서는 ZIP을 풀고 `chrome://extensions` 또는 `edge://extensions`에서 개발자 모드를 켠 뒤 **압축해제된 확장 프로그램을 로드**하여 해당 폴더를 선택합니다. Firefox에서는 `about:debugging`의 임시 부가 기능 로드로 `manifest.json`을 선택할 수 있습니다. Firefox 임시 설치는 브라우저 재시작 후 다시 로드해야 합니다. Kiwi처럼 확장을 지원하는 Android Chromium 브라우저에서는 확장 메뉴의 개발자 모드에서 **+ (from .zip/.crx/.user.js)**로 Chromium ZIP을 압축을 풀지 않고 설치할 수 있습니다(브라우저별 확장 API 지원 차이로 동작은 보장하지 않습니다). 서명된 스토어 패키지는 포함하지 않습니다.
 
 설치 직후 확장의 설정 탭이 열리고, 열려 있는 탭 중 최근에 쓴 앱 주소가 맨 위에 나옵니다. **이 주소로 연결**을 누르거나 앱 주소를 직접 입력해 저장하세요. 앱 탭에서 확장 팝업을 열어 **이 탭 주소로 연결**해도 됩니다. 주소는 경로·끝 슬래시 없는 HTTPS origin이며 로컬 개발 주소만 HTTP를 허용합니다. 이미 열린 앱 탭에도 새로고침 없이 연결합니다. 팝업의 **주소 변경**으로 다른 배포에 연결할 수 있습니다.
 

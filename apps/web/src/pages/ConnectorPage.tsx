@@ -4,11 +4,11 @@ import { Button, ButtonLink } from '../components/ui';
 import { cx } from '../lib/format';
 
 type Status = { installed: boolean; version?: string; hostPermission?: boolean };
-type Browser = 'chromium' | 'firefox';
+type Browser = 'chromium' | 'android' | 'firefox';
 
 const lite = () => import('../../../lite/client/index');
 const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-const defaultBrowser: Browser = /Firefox\//.test(navigator.userAgent) ? 'firefox' : 'chromium';
+const defaultBrowser: Browser = /Firefox\//.test(navigator.userAgent) ? 'firefox' : /Android/i.test(navigator.userAgent) ? 'android' : 'chromium';
 
 function CopyButton({ text, label = '복사' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -44,7 +44,7 @@ export function useConnectorStatus(poll = false) {
 
 export function connectorSummary(status: Status | null) {
   if (!status) return '확인하는 중…';
-  if (!status.installed) return mobile ? 'PC 브라우저에서 쓸 수 있어요' : '설치하면 막히는 소스를 내 브라우저로 연결해요';
+  if (!status.installed) return '설치하면 막히는 소스를 내 브라우저로 연결해요';
   if (status.hostPermission === false) return '사이트 접근 권한이 필요해요';
   return '연결됨';
 }
@@ -66,9 +66,15 @@ function StatusCard({ status }: { status: Status | null }) {
 }
 
 function Steps({ browser }: { browser: Browser }) {
-  const zip = `/install/moa-lite-connector-${browser}.zip`;
+  const zip = `/install/moa-lite-connector-${browser === 'firefox' ? 'firefox' : 'chromium'}.zip`;
   const download = <a className="btn btn-primary btn-m" href={zip} download><Download size={16} /><span>확장 받기</span></a>;
   const connect = <li>설치하면 열리는 창에서 <b>이 탭 주소로 연결</b>을 누르거나, 아래 앱 주소를 붙여 넣어요. 끝나면 이 화면이 <b>연결됨</b>으로 바뀌어요.</li>;
+  if (browser === 'android') return <ol className="remote-steps">
+    <li>확장 파일을 받아요. 압축은 풀지 않아도 돼요. {download}</li>
+    <li>브라우저 메뉴에서 <b>확장 프로그램</b>을 열고 <b>개발자 모드</b>를 켜요.</li>
+    <li><b>+ (from .zip/.crx/.user.js)</b>를 누르고 받은 ZIP 파일을 골라요.</li>
+    {connect}
+  </ol>;
   if (browser === 'firefox') return <ol className="remote-steps">
     <li>확장 파일을 받아 압축을 풀어요. {download}</li>
     <li>주소창에 <code>about:debugging#/runtime/this-firefox</code>를 열어요. <CopyButton text="about:debugging#/runtime/this-firefox" /></li>
@@ -90,15 +96,16 @@ export function ConnectorPage() {
   const connected = !!status?.installed && status.hostPermission !== false;
   return <div className="page-pad narrow settings-page remote-page">
     <header className="page-head page-head-row"><h1>연결 확장</h1><div className="page-head-actions"><ButtonLink to="/settings">설정</ButtonLink></div></header>
-    <p className="remote-lead">PC 브라우저에 설치하면 영상 소스 조회와 재생을 내 브라우저로 연결해요. 서버에서 막히는 소스가 줄어들고, 한 번 설치하면 자동으로 적용돼요. 선택 사항이에요.</p>
+    <p className="remote-lead">브라우저에 설치하면 영상 소스 조회와 재생을 내 브라우저로 연결해요. 서버에서 막히는 소스가 줄어들고, 한 번 설치하면 자동으로 적용돼요. 선택 사항이에요.</p>
 
-    {mobile ? <div className="remote-note"><b>PC 브라우저에서만 쓸 수 있어요</b><p>휴대폰 브라우저는 확장을 설치할 수 없어요. 확장 없이도 앱은 그대로 쓸 수 있고, 일부 소스만 재생이 제한될 수 있어요.</p></div> : <>
+    {mobile && !connected && <div className="remote-note" style={{ marginBottom: 20 }}><b>확장을 지원하는 브라우저가 필요해요</b><p>휴대폰 기본 Chrome·Safari는 확장을 설치할 수 없어요. Kiwi처럼 확장을 지원하는 Android 브라우저라면 아래 <b>모바일</b> 안내대로 설치할 수 있어요. 확장 없이도 앱은 그대로 쓸 수 있어요.</p></div>}
+    <>
       <StatusCard status={status} />
 
       <section className="settings-group">
         <h2>{connected ? '다른 브라우저에 설치' : '설치하기'}</h2>
         <div className="remote-modes" role="radiogroup" aria-label="브라우저">
-          {([['chromium', 'Chrome · Edge', 'Chromium 계열 브라우저'], ['firefox', 'Firefox', '임시 설치 · 다시 켜면 다시 로드']] as const).map(([value, title, via]) =>
+          {([['chromium', 'Chrome · Edge', 'PC Chromium 계열 브라우저'], ['android', '모바일 (Kiwi 등)', '확장을 지원하는 Android 브라우저'], ['firefox', 'Firefox', 'PC 임시 설치 · 다시 켜면 다시 로드']] as const).map(([value, title, via]) =>
             <button key={value} type="button" role="radio" aria-checked={browser === value} className={cx('remote-mode', browser === value && 'is-selected')} onClick={() => setBrowser(value)}>
               <span className="remote-mode-head"><b>{title}</b>{value === defaultBrowser && <em>이 브라우저</em>}</span>
               <small className="remote-mode-via">{via}</small>
@@ -121,6 +128,6 @@ export function ConnectorPage() {
           <p>로그인 쿠키는 기본으로 보내지 않아요. 로그인이 필요한 소스는 그 사이트를 연 채로 확장 아이콘을 눌러 <b>로그인 쿠키 사용</b>을 켜 주세요.</p>
           <p>영상은 원본에서 직접 받아요. 원본 사이트의 차단, WebView나 변환이 필요한 소스까지 풀리지는 않아요.</p></div>
       </section>
-    </>}
+    </>
   </div>;
 }
