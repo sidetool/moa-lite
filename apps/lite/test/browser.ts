@@ -13,12 +13,23 @@ await mkdir(artifacts, { recursive: true });
 await build({ entryPoints: [resolve(root, 'apps/lite/client/index.ts')], outfile: resolve(artifacts, 'api.js'), bundle: true, platform: 'browser', format: 'esm', target: 'es2022' });
 const store = new MemoryDocuments(), origin = 'http://127.0.0.1:5190';
 const batches: number[][] = [];
+let translationGate: Promise<void> | undefined;
+let releaseTranslation: (() => void) | undefined;
 const translationFetch: typeof fetch = async (_url, init) => {
   const prompt = JSON.parse(JSON.parse(String(init!.body)).contents[0].parts[0].text);
   batches.push(prompt.lines.map((line: any) => line.id));
+  await translationGate;
   return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ lines: prompt.lines.map((line: any) => ({ id: line.id, text: '번역 ' + line.text })) }) }] } }] }), { headers: { 'Content-Type': 'application/json' } });
 };
-const app = createLiteApplication({ store, origin, secret: 'moa-lite-test-secret-123456789012345', setupCode: 'LITE-TEST-SETU-P001', transport: fixtureTransport, translationFetch });
+let alternate = false;
+const transport = async (input: any, signal: AbortSignal) => {
+  if (alternate && input.url === repository) {
+    const bytes = Buffer.from(JSON.stringify([...registry, { ...registry[0], id: 124, name: 'Fixture Alternate' }]));
+    return { ...await fixtureTransport(input, signal), contentType: 'application/json', bytes: bytes.toString('base64'), size: bytes.length };
+  }
+  return fixtureTransport(input, signal);
+};
+const app = createLiteApplication({ store, origin, secret: 'moa-lite-test-secret-123456789012345', setupCode: 'LITE-TEST-SETU-P001', transport, translationFetch });
 const mime: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
 const requests: string[] = [];
 const server = createServer(async (req, res) => {
@@ -92,6 +103,22 @@ try {
   await api(a, '/media/' + page.items[1].id);
   const franchise = await api(a, `/media/${media.id}/franchise`); assert(franchise.seasons.some((season: any) => season.season === 2));
   const episodeId = detail.seasons[0].episodes[0].id;
+  let subtitleRequests = 0;
+  await a.route('**/api/lite/subtitles', route => {
+    subtitleRequests++;
+    return route.fulfill({json:{candidates:[{id:'fixture-sub',creatorName:'테스트',sourceUrl:'https://example.com/sub',content:'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n테스트\n',format:'vtt',confidence:1,matchedEpisode:1}],partial:true,issues:[{kind:'access-denied'}]}});
+  });
+  const searchPath = `/episodes/${episodeId}/subtitles/online`;
+  const found = await api(a, searchPath);
+  const repeated = await api(a, searchPath);
+  assert.equal(found.searchId, repeated.searchId); assert.equal(subtitleRequests, 1);
+  const refreshed = await api(a, searchPath + '?refresh=1');
+  assert.deepEqual(refreshed.query, found.query); assert.equal(subtitleRequests, 2);
+  const applied = await api(a, searchPath, {searchId:refreshed.searchId,candidateId:'fixture-sub'});
+  assert.equal((await api(a, searchPath, {searchId:refreshed.searchId,candidateId:'fixture-sub'})).id, applied.id);
+  await api(a, `/episodes/${episodeId}/subtitles/${applied.id}`, undefined, 'DELETE');
+  await a.unroute('**/api/lite/subtitles');
+  console.log('PASS local search cache, explicit retry identity and duplicate subtitle application');
   const playback = await api(a, '/playback', { episodeId }); assert.equal(playback.url, 'https://media.fixture.example.org/video.mp4'); assert.equal(playback.subtitles.length, 2);
   const hls = await api(a, '/playback', { episodeId, streamId: '1' }); assert.equal(hls.mime, 'application/vnd.apple.mpegurl');
   await api(a, '/settings', { autoFetchSubtitles: false, autoplayNext: false }, 'PATCH');
@@ -101,7 +128,13 @@ try {
   const two = await browser.newContext(), b = await pageFor(two); await login(b, 'admin');
   const restored = await api(b, '/profiles'); assert.equal(restored[0].id, profile.id); await select(b, profile.id);
   const watchlist = await api(b, '/watchlist'); assert.equal(watchlist[0].id, media.id);
-  const history = await api(b, '/history'); assert(history);
+  const history = await api(b, '/history'); assert.equal(history.items.length, 1);
+  const continued = (await api(b, '/home?continueScope=all')).rows.find((row: any) => row.kind === 'continue')?.items.find((card: any) => card.id === media.id);
+  assert.equal(continued?.resume?.episodeId, detail.seasons[0].episodes[1].id);
+  assert.equal(continued?.resume?.kind, 'next');
+  assert.equal(continued?.resume?.position, 0);
+  assert.equal((await api(b, '/history')).items.length, 1, 'next target is not viewing history');
+  console.log('PASS completed episode continues to next episode on a freshly synced device without phantom history');
   assert.equal((await api(b, '/sources'))[0].installed, true);
   await api(b, '/watchlist/' + media.id, undefined, 'DELETE'); await sync(b); await sync(a); assert.equal((await api(a, '/watchlist')).length, 0);
   console.log('PASS second device restores shared sources, profile, watchlist/history; deletion propagates');
@@ -170,6 +203,9 @@ try {
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
   await a.getByRole('button', { name: /한국어 ASS/ }).click();
   await a.waitForFunction(() => [...document.querySelectorAll('canvas')].some(canvas => canvas.width > 0 && canvas.height > 0));
+  await a.reload();
+  await a.waitForFunction(() => [...document.querySelectorAll('canvas')].some(canvas => canvas.width > 0 && canvas.height > 0));
+  await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
   await a.evaluate(async () => { await document.querySelector('video')!.play(); });
   await a.waitForFunction(() => document.querySelector('video')!.currentTime > 1.7);
   await a.evaluate(() => document.querySelector('video')!.pause());
@@ -179,8 +215,38 @@ try {
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
   await a.getByRole('button', { name: '한국어', exact: true }).click();
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
-  await a.waitForFunction(() => [...document.querySelector('video')!.textTracks].some(track => track.mode === 'showing' && !!track.cues?.length));
+  await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => track.mode === 'showing' && !!track.cues?.length));
   console.log('PASS original JASSUB Korean ASS rendering and VTT track switching');
+  // The selected track survives reload; custom VTT styling travels with the same video into PiP.
+  await a.evaluate(() => localStorage.setItem('moa.subtitleAppearance', JSON.stringify({ size: 'large', background: 'soft' })));
+  await a.reload();
+  await a.waitForFunction(() => document.querySelector('video')?.readyState! >= 2);
+  await a.evaluate(() => { const v = document.querySelector('video')!; v.pause(); v.currentTime = 1; (window as any).__pipVideo = v; });
+  await a.waitForFunction(() => !!document.querySelector('.subtitle-cue')?.textContent);
+  assert.equal(await a.locator('.subtitle-overlay').getAttribute('data-background'), 'soft');
+  await a.getByRole('button', { name: 'PIP', exact: true }).click({ force: true });
+  await a.waitForFunction(() => !!(window as any).documentPictureInPicture?.window?.document.querySelector('video'));
+  assert(await a.evaluate(() => {
+    const w = (window as any).documentPictureInPicture.window;
+    return w.document.querySelector('video') === (window as any).__pipVideo && !!w.document.querySelector('.subtitle-cue')?.textContent;
+  }));
+  await a.evaluate(() => (window as any).documentPictureInPicture.window.close());
+  await a.waitForFunction(() => document.querySelector('video') === (window as any).__pipVideo);
+  assert(await a.locator('.subtitle-cue').count() > 0);
+  await a.evaluate(() => localStorage.removeItem('moa.subtitleAppearance'));
+  await a.reload();
+  await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => track.mode === 'showing' && !!track.cues?.length));
+  await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
+  console.log('PASS subtitle preference reload, styled VTT overlay, Document PiP subtitle/video continuity and return');
+  const beforeImport = requests.length;
+  await a.getByLabel('자막 파일 선택', { exact: true }).setInputFiles(resolve(root, 'packages/subtitles-ko/test/fixtures/lite-korean.7z'));
+  await a.getByRole('button', { name: '구름 정원 1화.srt', exact: true }).waitFor();
+  await a.getByRole('button', { name: '구름 정원 2화.srt', exact: true }).waitFor();
+  await a.getByRole('button', { name: '구름 정원 1화.srt', exact: true }).click();
+  await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => track.mode === 'showing' && [...(track.cues ?? [])].some(cue => (cue as VTTCue).text.includes('한글 자막 1화'))));
+  assert(!requests.slice(beforeImport).some(path => path.startsWith('/api/lite/subtitles') || path.startsWith('/api/lite/convert') || path.startsWith('/api/subtitles/import')));
+  console.log('PASS local Korean 7z upload, episode selection and actual VTT rendering with no server import/conversion');
+
   await a.screenshot({ path: resolve(artifacts, 'player.png') });
   await a.evaluate(() => document.querySelector('video')!.pause());
   await a.getByRole('button', { name: '재생 설정', exact: true }).click({ force: true });
@@ -205,9 +271,102 @@ try {
   console.log('PASS season switch through the original MOA season picker');
   await api(a, '/settings', { navigation: ['home', 'movies', 'anime', 'series'].map((id, index) => ({ id, name: ['홈', '영화', '애니', '시리즈'][index], sourceIds: [sourceId], includeLocal: false })) }, 'PATCH');
   await compareOriginalUi(browser, a, path => api(a, path), profile.id, media.id, artifacts);
+  await a.setViewportSize({ width: 390, height: 844 });
+  await a.goto(origin + '/settings');
+  const quality = a.getByRole('combobox', { name: 'preferredQuality', exact: true });
+  await quality.click();
+  await a.getByRole('option', { name: '720p', exact: true }).click();
+  await a.waitForFunction(() => document.querySelector('[aria-label="preferredQuality"]')?.textContent?.includes('720p'));
+  const reset = a.locator('#tabs').getByRole('button', { name: '기본값', exact: true });
+  await reset.click();
+  const confirmation = a.getByRole('alertdialog', { name: '탭 초기화' });
+  await confirmation.waitFor();
+  assert(await confirmation.getByRole('button', { name: '취소' }).evaluate(el => el === document.activeElement));
+  await a.keyboard.press('Escape');
+  await confirmation.waitFor({ state: 'detached' });
+  assert(await reset.evaluate(el => el === document.activeElement));
+  console.log('PASS mobile settings dropdown selection and confirmation cancellation/focus restoration');
+  await a.evaluate(() => { localStorage.setItem('moa.remoteMode', 'on'); window.dispatchEvent(new Event('moa:remote-mode')); });
+  await quality.focus(); await quality.press('Enter'); await quality.press('Home'); await quality.press('ArrowDown'); await quality.press('Enter');
+  await a.waitForFunction(() => document.querySelector('[aria-label="preferredQuality"]')?.textContent?.includes('1080p'));
+  await a.evaluate(() => { localStorage.setItem('moa.remoteMode', 'off'); window.dispatchEvent(new Event('moa:remote-mode')); });
+  console.log('PASS TV remote does not intercept dropdown navigation or selection');
+
+  await a.setViewportSize({ width: 1280, height: 720 });
+  alternate = true;
+  const updatedSources = await api(a, '/sources/refresh', { url: repository });
+  const secondSource = updatedSources.find((item: any) => item.name === 'Fixture Alternate');
+  await api(a, `/sources/${secondSource.id}/install`, {});
+  const alternateList = await api(a, `/sources/${secondSource.id}/browse`, { mode: 'popular', page: 1 });
+  const alternateMedia = alternateList.items[0];
+  const alternateDetail = await api(a, '/media/' + alternateMedia.id);
+  await api(a, `/media/${media.id}/group`, { action: 'merge', otherId: alternateMedia.id }, 'PATCH');
+  // Hold the first translation response: switching sources must preserve an auto job
+  // even before it has produced a subtitle track, and while another track is selected.
+  translationGate = new Promise<void>(resolve => { releaseTranslation = resolve; });
+  const pendingTranslation = await api(a, `/episodes/${episodeId}/subtitles/translate`, {
+    content: 'WEBVTT\n\n00:00:00.000 --> 00:00:07.000\nPending handoff translation\n', format: 'vtt', sourceLabel: 'Handoff', sourceLanguage: 'en',
+  });
+  await a.evaluate(({ episodeId, profileId, jobId }) => {
+    sessionStorage.setItem('moa.translationJob:' + JSON.stringify([profileId, episodeId]), JSON.stringify({ id: jobId, label: 'Handoff', origin: 'auto' }));
+  }, { episodeId, profileId: profile.id, jobId: pendingTranslation.id });
+  await a.goto(origin + '/watch/' + episodeId + '?t=0');
+  await a.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+  await a.evaluate(() => { document.querySelector('video')!.pause(); });
+  await a.getByLabel('자막 파일 선택', { exact: true }).setInputFiles({ name: 'carry.srt', mimeType: 'text/plain', buffer: Buffer.from('1\n00:00:00,000 --> 00:00:07,000\n옮겨 온 자막\n') });
+  await a.getByRole('button', { name: 'carry.srt', exact: true }).waitFor();
+  await a.getByRole('button', { name: '번역 진행 중 0%', exact: true }).waitFor();
+  await a.getByRole('button', { name: /자막 설정/ }).click();
+  await a.getByRole('button', { name: '+0.5', exact: true }).click();
+  await a.keyboard.press('Escape');
+  await a.getByRole('button', { name: '재생 설정', exact: true }).click({ force: true });
+  await a.getByRole('button', { name: '다른 소스 선택', exact: true }).click();
+  await a.getByRole('button', { name: 'Fixture Alternate', exact: true }).click();
+  await a.getByRole('button', { name: '이 회차로 재생', exact: true }).click();
+  await a.waitForURL(url => url.pathname === '/watch/' + alternateDetail.seasons[0].episodes[0].id);
+  assert.equal(await a.evaluate(({ profileId, target }) => {
+    return JSON.parse(sessionStorage.getItem('moa.translationJob:' + JSON.stringify([profileId, target])) || 'null')?.id;
+  }, { profileId: profile.id, target: alternateDetail.seasons[0].episodes[0].id }), pendingTranslation.id);
+  assert.notEqual((await api(a, '/translations/' + pendingTranslation.id)).state, 'cancelled');
+  await a.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+  await a.evaluate(() => document.querySelector('video')!.pause());
+  releaseTranslation!(); translationGate = undefined;
+  await waitJob(a, pendingTranslation.id, job => job.state === 'completed');
+  console.log('PASS source switch before first translated cue preserves the auto job through completion');
+  await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => [...(track.cues ?? [])].some(cue => (cue as VTTCue).text.includes('옮겨 온 자막') && cue.startTime === .5)));
+  await a.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 2);
+  await a.evaluate(() => { const v = document.querySelector('video')!; v.pause(); v.currentTime = 3; });
+  await a.waitForFunction(() => { const v = document.querySelector('video'); return v && !v.seeking && v.currentTime >= 3; });
+  await a.getByRole('button', { name: '뒤로', exact: true }).evaluate((el: HTMLButtonElement) => el.click());
+  await a.waitForURL(url => url.pathname !== '/watch/' + alternateDetail.seasons[0].episodes[0].id);
+  await a.waitForFunction(async (mediaId: string) => {
+    const { liteFetch } = await import('/testing/api.js' as string);
+    const history = await (await liteFetch('/api/history', {})).json();
+    return history.items.some((item: any) => item.media.id === mediaId && item.episode.progress.position >= 3);
+  }, alternateMedia.id);
+  const saved = await api(a, '/history');
+  assert(saved.items.some((item: any) => item.media.id === alternateMedia.id && item.episode.progress.position >= 3));
+  console.log('PASS source switch retains local subtitle and offset, and leaving playback saves the final position');
+  await api(a, '/progress', { episodeId, position: 200, duration: 1400 });
+  await api(a, '/progress', { episodeId: detail.seasons[0].episodes[1].id, position: 1400, duration: 1400 });
+  assert(!(await api(a, '/home?continueScope=all')).rows.find((r: any) => r.kind === 'continue')?.items.some((c: any) => c.id === media.id), 'old unfinished episode must not override latest completed finale');
+  await a.goto(origin + '/history');
+  await a.getByRole('button', { name: 'Fixture Series 작품 기록 모두 삭제', exact: true }).first().click();
+  const erase = a.getByRole('alertdialog', { name: '작품 기록을 모두 삭제할까요?' });
+  await erase.waitFor();
+  await erase.getByRole('button', { name: '취소', exact: true }).click();
+  assert.equal((await api(a, '/history')).items.find((item: any) => item.media.id === media.id).groupedCount, 2);
+  await a.getByRole('switch', { name: '작품별로 보기', exact: true }).click();
+  await a.waitForFunction(() => { const toggle = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="작품별로 보기"]'); return toggle?.getAttribute('aria-checked') === 'false' && !toggle.disabled; });
+  assert.equal((await api(a, '/history')).items.filter((item: any) => item.media.id === media.id).length, 2);
+  await api(a, '/history/media/' + media.id, undefined, 'DELETE');
+  assert(!(await api(a, '/history')).items.some((item: any) => item.media.id === media.id));
+  await sync(a); await sync(b);
+  assert(!(await api(b, '/history')).items.some((item: any) => item.media.id === media.id));
+  console.log('PASS grouped history cancellation, per-episode view and whole-title deletion synced across devices');
   assert(!requests.some(path => /\/api\/.*(?:\.mp4|\.m3u8|\.ts)/.test(path)));
   assert.deepEqual(errors, []);
   console.log('PASS existing MOA desktop/mobile title UI, SPA direct entry, no video transfer through API, no browser errors');
   await readFile(resolve(root, 'apps/web/dist/runtime/quickjs.wasm'));
   console.log('Browser verification complete. Artifacts: ' + artifacts);
-} finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+} finally { releaseTranslation?.(); await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

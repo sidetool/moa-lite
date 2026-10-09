@@ -2,7 +2,7 @@ import type { Episode, EpisodeProgress, MediaCard, MediaDetail, HomeResponse, Hi
 import { KidsPolicy } from './kids.js';
 import { Store } from './db.js';
 import { ApiFailure, normalize } from './util.js';
-import { playTarget, summary } from './progress.js';
+import { continueTarget, playTarget, summary } from './progress.js';
 import { videoStream, type Probe } from './probe.js';
 import { overlayCard, overlayDetail } from './tmdb.js';
 
@@ -16,19 +16,25 @@ export class Catalog {
   kids: KidsPolicy;
   constructor(public db: Store) { this.kids = new KidsPolicy(db); }
   episodes(id: string, profile: string): Episode[] {
-    return this.db.all('SELECT * FROM episodes WHERE media_id=? ORDER BY season,number', id).map(e => {
-      const p = this.db.get('SELECT * FROM progress WHERE profile_id=? AND episode_id=?', profile, e.id);
+    return this.db.all(`SELECT e.*,p.position,p.duration AS progress_duration,p.completed,p.updated_at
+      FROM episodes e LEFT JOIN progress p ON p.episode_id=e.id AND p.profile_id=?
+      WHERE e.media_id=? ORDER BY e.season,e.number,e.id`, profile,id).map(e => {
+      const p = e.updated_at !== null ? { ...e, duration: e.progress_duration } : undefined;
       return { id: e.id, mediaId: e.media_id, season: e.season, number: e.number, title: e.title, duration: e.duration, ...(e.thumb ? { thumb: e.thumb } : {}), ...(p ? { progress: episodeProgress(p) } : {}) };
     });
   }
   card(row: Record<string, any>, profile: string): MediaCard {
     const { poster, backdrop, year, genres, provider, live } = JSON.parse(row.metadata);
-    const p = this.db.get(`SELECT p.*,e.season,e.number,e.media_id FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? AND e.media_id=? AND p.completed=0 AND p.position>0 ORDER BY p.updated_at DESC LIMIT 1`, profile, row.id);
+    const episodes = this.episodes(row.id, profile);
+    const resume = !live ? continueTarget(episodes, row.type === 'movie') : null;
+    const current = resume && episodes.find(e => e.id === resume.episodeId);
     return overlayCard(this.db, { id: row.id, title: this.db.displayTitle(row.id, row.title), type: row.type, provider: provider || LOCAL_PROVIDER, ...(live ? { badge: "LIVE" } : {}), addedAt: row.added_at,
       ...(poster ? { poster } : {}), ...(backdrop ? { backdrop } : {}), ...(year ? { year } : {}), ...(genres?.length ? { genres } : {}),
       ...(row.type !== 'movie' ? { episodeCount: this.db.get('SELECT COUNT(*) AS n FROM episodes WHERE media_id=?', row.id)!.n } : {}),
       inWatchlist: Boolean(this.db.get('SELECT 1 FROM watchlist WHERE profile_id=? AND media_id=?', profile, row.id)),
-      ...(p && !p.completed && p.position > 0 ? { progress: summary({ id: p.episode_id, mediaId: row.id, season: p.season, number: p.number, title: '' }, episodeProgress(p), row.type === 'movie') } : {}),
+      ...(resume ? { resume } : {}),
+      ...(current?.progress && !current.progress.completed && current.progress.position > 0
+        ? { progress: summary(current, current.progress, row.type === 'movie') } : {}),
     }, !provider || provider.kind === 'local');
   }
   cards(profile: string, type?: MediaType): MediaCard[] {
@@ -62,10 +68,10 @@ export class Catalog {
     const cards = allCards.filter(allowed), watchlist = this.watchlist(profile).filter(c => (!type || c.type === type) && allowed(c));
     // Home resume history belongs to the profile, independently of tab discovery sources.
     const resumeCards = new Map((continueScope === 'all' ? allCards : cards).map(c => [c.id, c]));
-    const ongoing = this.db.all(`SELECT e.media_id,MAX(p.updated_at) AS updated FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? AND p.completed=0 AND p.position>0 GROUP BY e.media_id ORDER BY updated DESC`, profile)
+    const ongoing = this.db.all(`SELECT e.media_id,MAX(p.updated_at) AS updated FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? AND (p.position>0 OR p.completed=1) GROUP BY e.media_id ORDER BY updated DESC`, profile)
       .flatMap(p => {
         const card = resumeCards.get(p.media_id);
-        return card ? [card] : [];
+        return card?.resume ? [card] : [];
       });
     const local = cards.filter(c => c.provider.kind === "local");
     const rows: Row[] = [
@@ -81,10 +87,17 @@ export class Catalog {
   }
   page<T>(items: T[], page: number, size = 40): Page<T> { return { items: items.slice((page - 1) * size, page * size), page, hasNextPage: items.length > page * size, total: items.length }; }
   history(profile: string, page: number): Page<HistoryEntry> {
-    const records = this.db.all('SELECT p.*,e.media_id FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? ORDER BY p.updated_at DESC', profile);
+    const records = this.db.all('SELECT p.*,e.media_id FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? ORDER BY p.updated_at DESC,p.episode_id DESC', profile);
     const visible = new Set(this.kids.filter(records.map(p => ({ id: p.media_id })), profile).map(p => p.id));
-    const paged = this.page(records.filter(p => visible.has(p.media_id)), page);
-    return { ...paged, items: paged.items.map(p => ({ media: this.card(this.db.get('SELECT * FROM media WHERE id=?', p.media_id)!, profile), episode: this.episodes(p.media_id, profile).find(e => e.id === p.episode_id)!, watchedAt: p.updated_at })) };
+    const grouped = this.db.settings(profile).groupHistory;
+    const counts = new Map<string, number>();
+    const filtered = records.filter(p => visible.has(p.media_id)).filter(p => {
+      const count = counts.get(p.media_id) || 0;
+      counts.set(p.media_id, count + 1);
+      return !grouped || count === 0;
+    });
+    const paged = this.page(filtered, page);
+    return { ...paged, items: paged.items.map(p => ({ media: this.card(this.db.get('SELECT * FROM media WHERE id=?', p.media_id)!, profile), episode: this.episodes(p.media_id, profile).find(e => e.id === p.episode_id)!, watchedAt: p.updated_at, ...(grouped ? { groupedCount: counts.get(p.media_id)! } : {}) })) };
   }
   search(profile: string, query: string) {
     const q = normalize(query);

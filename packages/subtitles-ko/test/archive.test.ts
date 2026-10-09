@@ -5,6 +5,13 @@ import { extractSubtitleBuffer, safeZipPath } from "../src/index.js";
 
 const fixture = (name: string) => readFileSync(new URL(`fixtures/${name}`, import.meta.url));
 
+test('WASM preserves Korean 7z filenames and selects the requested 화', async () => {
+  const result = await extractSubtitleBuffer(fixture('lite-korean.7z'), 'batch.7z', { episode: 1, season: 1 });
+  assert.equal(result?.filename, '구름 정원 1화.srt');
+  assert.match(result!.content, /한글 자막 1화/);
+  assert.equal(await extractSubtitleBuffer(fixture('lite-korean.7z'), 'batch.7z', { episode: 3 }), null);
+});
+
 test("multi-file ZIP selects the requested episode and preserves ASS", async () => {
   const result = await extractSubtitleBuffer(fixture("episodes.zip"), "batch.zip", { episode: 3, season: 2 });
   assert.equal(result?.filename, "작품 S02E03.ass");

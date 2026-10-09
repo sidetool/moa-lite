@@ -41,7 +41,7 @@ let profiles: Profile[] = [
   { id: "p1", name: "코호", color: "violet", kids: false, createdAt: new Date().toISOString() },
   { id: "p2", name: "가족", color: "teal", kids: false, createdAt: new Date().toISOString() }
 ];
-let settings: Settings = { autoplayNext: true, autoplayDelay: 5, defaultSubtitleLang: "ko", subtitleSize: "medium", preferredQuality: "auto", hardwareTranscoding: true, autoFetchSubtitles: true, translationMode: "manual", translationSourcePriority: "site", skipSubtitleSearchWithSiteTrack: true, skipTranslationWithoutSubtitles: true };
+let settings: Settings = { groupHistory: true, autoplayNext: true, autoplayDelay: 5, defaultSubtitleLang: "ko", subtitleSize: "medium", preferredQuality: "auto", hardwareTranscoding: true, autoFetchSubtitles: true, translationMode: "manual", translationSourcePriority: "site", skipSubtitleSearchWithSiteTrack: true, skipTranslationWithoutSubtitles: true };
 
 function detail(id: string): MediaDetail | null {
   const card = byId.get(id);

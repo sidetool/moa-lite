@@ -14,7 +14,7 @@ import { SubtitleAdvancedSettings } from "../components/SubtitleAdvancedSettings
 import { translationModeOf, useTranslationConfig, type TranslationMode } from "../api/translation";
 import { keys, useFolders, useMe, useScanStatus, useSettings } from "../api/queries";
 import { AccountSection } from "./AccountsPage";
-import { Button, EmptyState, IconButton, Skeleton, Spinner } from "../components/ui";
+import { Button, Select, EmptyState, IconButton, Skeleton, Spinner } from "../components/ui";
 import { api, currentProfileId, hasLoginGate } from "../lib/api";
 import { TYPE_LABEL, cx } from "../lib/format";
 
@@ -145,11 +145,7 @@ function TranslationModeRow({ mode, available, korean, onChange }: { mode: Trans
         <small>{available ? MODE_TEXT[mode] : "관리자가 AI 자막 번역을 켜면 고를 수 있어요."}</small>
         {available && mode !== "manual" && !korean && <small className="is-warn">기본 자막 언어가 한국어일 때만 동작해요.</small>}
       </div>
-      <select className="setting-select" aria-label="AI 자막 번역 방식" value={mode} disabled={!available} onChange={event => onChange(event.target.value as TranslationMode)}>
-        <option value="manual">직접 번역</option>
-        <option value="ask">번역할지 묻기</option>
-        <option value="auto">자동 번역</option>
-      </select>
+      <Select className="setting-select" aria-label="AI 자막 번역 방식" value={mode} disabled={!available} onChange={value => onChange(value as TranslationMode)} options={[{ value: "manual", label: "직접 번역" }, { value: "ask", label: "번역할지 묻기" }, { value: "auto", label: "자동 번역" }]} />
     </div>
   );
 }
@@ -189,9 +185,7 @@ export function SettingsPage() {
     <div className="setting"><div><b>{title}</b><small>{desc}</small></div>{control}</div>
   );
   const select = <K extends keyof Settings>(key: K, options: Array<[Settings[K], string]>) => (
-    <select className="setting-select" aria-label={String(key)} value={String(s[key])} onChange={event => void save({ [key]: (typeof s[key] === "number" ? Number(event.target.value) : event.target.value) } as Partial<Settings>)}>
-      {options.map(([value, label]) => <option key={String(value)} value={String(value)}>{label}</option>)}
-    </select>
+    <Select className="setting-select" aria-label={String(key)} value={String(s[key])} onChange={value => void save({ [key]: (typeof s[key] === "number" ? Number(value) : value) } as Partial<Settings>)} options={options.map(([value, label]) => ({ value: String(value), label }))} />
   );
   const link = (to: string, icon: React.ReactNode, title: string, desc: string) => (
     <Link to={to} className="setting setting-link"><span className="setting-icon">{icon}</span><div><b>{title}</b><small>{desc}</small></div><ChevronRight size={18} /></Link>
@@ -223,10 +217,10 @@ export function SettingsPage() {
         {import.meta.env.VITE_MOA_LITE === "1" && <ConnectorLink />}
         {row("재생 시 전체 화면", "작품을 누르면 바로 전체 화면으로 재생합니다. 끄면 재생 화면에서 직접 전환해요.", <Toggle label="재생 시 전체 화면" checked={device.fullscreenOnPlay} onChange={value => setPref("fullscreenOnPlay", value)} />)}
         {row("오프닝·엔딩 자동 건너뛰기", "구간 정보가 있는 회차에서 오프닝과 엔딩을 알아서 넘깁니다. 되감으면 다시 볼 수 있어요.", <Toggle label="오프닝·엔딩 자동 건너뛰기" checked={device.autoSkip} onChange={value => setPref("autoSkip", value)} />)}
-        {row("빠른 탐색 간격", "두 번 탭, 앞으로·뒤로 버튼과 J·L 키로 이동하는 시간", <select className="setting-select" aria-label="빠른 탐색 간격" value={device.seekStep} onChange={e => setPref("seekStep", Number(e.target.value) as DevicePrefs["seekStep"])}>{[5, 10, 15, 30].map(v => <option key={v} value={v}>{v}초</option>)}</select>)}
+        {row("빠른 탐색 간격", "두 번 탭, 앞으로·뒤로 버튼과 J·L 키로 이동하는 시간", <Select className="setting-select" aria-label="빠른 탐색 간격" value={String(device.seekStep)} onChange={value => setPref("seekStep", Number(value) as DevicePrefs["seekStep"])} options={[5, 10, 15, 30].map(value => ({ value: String(value), label: `${value}초` }))} />)}
         {row("작품별 자막 싱크 기억", "자막 싱크를 조절하면 같은 작품의 다음 회차에도 그대로 적용합니다.", <Toggle label="작품별 자막 싱크 기억" checked={device.rememberSubOffset} onChange={value => setPref("rememberSubOffset", value)} />)}
         {row("화면 채우기", "영상을 화면 비율에 맞춰 꽉 채웁니다. 가장자리가 조금 잘릴 수 있어요.", <Toggle label="화면 채우기" checked={device.videoFill} onChange={value => setPref("videoFill", value)} />)}
-        {row("TV 리모컨 모드", "방향키로 이동하고 확인 버튼으로 선택합니다. 자동 모드는 TV 감지 또는 탐색 화면의 방향키 입력으로 켜집니다.", <select className="setting-select" aria-label="TV 리모컨 모드" value={remote} onChange={e => { const value=e.target.value as RemotePreference; setRemote(value); setRemotePreference(value); }}><option value="auto">자동</option><option value="on">항상 켜기</option><option value="off">끄기</option></select>)}
+        {row("TV 리모컨 모드", "방향키로 이동하고 확인 버튼으로 선택합니다. 자동 모드는 TV 감지 또는 탐색 화면의 방향키 입력으로 켜집니다.", <Select className="setting-select" aria-label="TV 리모컨 모드" value={remote} onChange={value => { setRemote(value as RemotePreference); setRemotePreference(value as RemotePreference); }} options={[{ value: "auto", label: "자동" }, { value: "on", label: "항상 켜기" }, { value: "off", label: "끄기" }]} />)}
       </div></section>
       <section className="settings-group"><h2>실험 기능</h2><div className="settings-card">
         {row("다른 소스 시즌 모아보기", "작품 상세의 시즌 메뉴에 다른 소스에 있는 정규 시즌까지 모아 순서대로 보여줘요. 시즌을 찾는 동안 목록이 늦게 채워질 수 있어요.", <Toggle label="다른 소스 시즌 모아보기" checked={device.seasonSwitcher} onChange={value => setPref("seasonSwitcher", value)} />)}

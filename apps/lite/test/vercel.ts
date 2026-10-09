@@ -23,7 +23,7 @@ assert(files.some(path => path.endsWith('deploy/auth/setup.html')));
 assert(files.some(path => path.endsWith('sql.js/dist/sql-wasm.wasm')));
 assert(files.includes('vendor/byedpi/ciadpi-linux-x64'));
 assert(files.includes('vendor/byedpi/LICENSE'));
-assert(files.some(path => path.endsWith('libarchive-wasm/dist/libarchive.wasm')));
+assert(files.some(path => path.endsWith('7z-wasm/7zz.wasm')));
 assert(files.includes('packages/subtitles-ko/dist/archive-worker.cjs'));
 assert(!files.some(path => /apps\/lite\/test\/assets/.test(path)));
 const dir = resolve(root, '.state/vercel-function'); await mkdir(dir, { recursive: true });

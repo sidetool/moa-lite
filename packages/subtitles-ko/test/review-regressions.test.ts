@@ -353,7 +353,9 @@ for (const concurrency of [1, 4]) {
     // requests per collector and the separate pools explain this upper bound.
     assert.ok(peak <= 2 * (Math.min(3, concurrency) + concurrency), JSON.stringify(counts));
     assert.equal(calls.filter(url => url.includes("/feeds/posts/default")).length, 2);
-    assert.ok(calls.length <= 22, JSON.stringify(counts));
+    // One bounded public-search fallback after the ordinary providers fail.
+    assert.equal(calls.filter(url => url.startsWith('https://search.naver.com/')).length, 1);
+    assert.ok(calls.length <= 23, JSON.stringify(counts));
   });
 }
 

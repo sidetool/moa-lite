@@ -467,3 +467,20 @@
 .avatar-art { display: block; width: 100%; height: 100%; }
 .card-season { display: block; margin-top: 2px; overflow: hidden; color: var(--text-3); font-size: .76rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .card-lang { position: absolute; top: 8px; right: 8px; z-index: 2; padding: 2px 6px; border-radius: 4px; background: rgba(9, 9, 11, .62); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .82); backdrop-filter: blur(6px); font-size: .64rem; font-weight: 800; letter-spacing: .04em; }
+
+.dropdown { display: inline-flex; min-width: 0; max-width: 100%; vertical-align: middle; }
+.dropdown-trigger { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); font-weight: 600; text-align: left; }
+.dropdown-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-trigger > svg { color: var(--text-3); }
+.dropdown-trigger:hover:not(:disabled), .dropdown-trigger[aria-expanded=true] { border-color: var(--text-3); }
+.dropdown-trigger:disabled { opacity: .5; }
+.dropdown-menu { position: fixed; inset: auto; margin: 0; padding: 5px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-m); background: var(--surface-2); color: var(--text); box-shadow: var(--shadow-pop); overflow: auto; overscroll-behavior: contain; }
+.dropdown-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 9px 10px; border-radius: var(--radius-s); font-size: .9rem; font-weight: 500; text-align: left; }
+.dropdown-option > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dropdown-option.is-active { background: var(--surface-3); }
+.dropdown-option[aria-selected=true] { color: var(--accent-strong); font-weight: 700; }
+
+.confirm-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--hairline-strong); border-radius: var(--radius-l); background: var(--bg-raised); color: var(--text); box-shadow: 0 30px 80px #0009; }
+.confirm-dialog::backdrop { background: #000a; backdrop-filter: blur(4px); }
+.confirm-dialog-body { padding: 12px 22px 24px; color: var(--text-2); line-height: 1.6; overflow-wrap: anywhere; }
+.confirm-dialog .sheet-foot { justify-content: flex-end; }

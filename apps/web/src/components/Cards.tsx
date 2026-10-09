@@ -4,7 +4,7 @@ import type { MediaCard } from "@moa/shared";
 import { Artwork } from "./Artwork";
 import { ProgressBar, Skeleton } from "./ui";
 import { TYPE_LABEL, cx } from "../lib/format";
-import { foreignLang, seasonInfo } from "../lib/card-meta";
+import { foreignLang, resumeTarget, seasonInfo } from "../lib/card-meta";
 
 function metaLine(card: MediaCard) {
   return [card.rating ? `★ ${card.rating.toFixed(1)}` : null, card.year, TYPE_LABEL[card.type], card.episodeCount && card.type !== "movie" ? `${card.episodeCount}화` : null].filter(Boolean).join(" · ");
@@ -44,22 +44,24 @@ export function RankCard({ card, rank, eager }: { card: MediaCard; rank: number;
   );
 }
 
-/** 16:9 card for "continue watching": one tap resumes playback. */
+/** 16:9 card for "continue watching": one tap resumes, or starts the next episode after a finished one. */
 export function LandscapeCard({ card, eager }: { card: MediaCard; eager?: boolean }) {
   const navigate = useNavigate();
-  const resumeTo = card.progress ? `/watch/${encodeURIComponent(card.progress.episodeId)}` : `/title/${encodeURIComponent(card.id)}`;
+  const resume = resumeTarget(card);
+  const action = resume?.kind === "next" ? "다음 회차 보기" : resume ? "이어보기" : "";
   return (
     <div className={cx("card landscape-card", card.badge === "LIVE" && "live-card")}>
-      <Link to={resumeTo} className="card-frame" aria-label={`${card.title} ${card.progress ? "이어보기" : ""}`}>
+      <Link to={resume?.path ?? `/title/${encodeURIComponent(card.id)}`} className="card-frame" aria-label={[card.title, resume?.label, action].filter(Boolean).join(" · ")}>
         <Artwork src={card.backdrop} fallbackSrc={card.poster} title={card.title} ratio="landscape" width={640} eager={eager} labelFallback={!card.backdrop} />
         {card.badge === "LIVE" && <span className="card-badge">LIVE</span>}
         <span className="card-play" aria-hidden="true"><Play size={22} fill="currentColor" /></span>
+        {/* The server sends progress only for real unfinished viewing, never for an unseen next episode. */}
         {card.progress && <ProgressBar ratio={card.progress.ratio} className="card-progress" />}
       </Link>
       <div className="landscape-meta">
         <div>
           <span className="card-title">{card.title}</span>
-          {card.progress && <span className="card-sub">{card.progress.label}</span>}
+          {resume && <span className="card-sub">{resume.label}</span>}
         </div>
         <button className="icon-btn icon-btn-s" data-remote-secondary aria-label={`${card.title} 상세 정보`} title="상세 정보" onClick={() => navigate(`/title/${encodeURIComponent(card.id)}`)}>
           <Info size={18} />

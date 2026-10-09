@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { BrowseSchema, BrowseSelection, FilterChange, FilterValue } from '@moa/shared';
 import { api } from '../lib/api';
-import { Button } from './ui';
+import { Button, Select } from './ui';
 
 export const useSourceFilters = (id: string) => useQuery({ queryKey:['source-filters',id], queryFn:({signal}) => api<BrowseSchema>(`/sources/${encodeURIComponent(id)}/filters`,{signal}), enabled:!!id, staleTime:60_000,retry:false });
 export function SourceFilters({ schema, value, onChange }: {schema:BrowseSchema;value?:BrowseSelection;onChange:(v:BrowseSelection|undefined)=>void}) {
@@ -24,7 +24,7 @@ export function SourceFilters({ schema, value, onChange }: {schema:BrowseSchema;
       const change = (v:FilterValue) => set(f.position,f.groupPosition,v);
       const sort = typeof v === 'object' ? v : {index:0,ascending:false};
       return <label className="field" key={f.id}><span>{f.label}</span>
-        {f.kind === 'select' || f.kind === 'sort' ? <><select aria-label={f.label} value={f.kind === 'sort' ? sort.index : Number(v ?? 0)} onChange={e => change(f.kind === 'sort' ? {...sort,index:Number(e.target.value)} : Number(e.target.value))}>{f.options?.map((o,i) => <option value={i} key={i}>{o}</option>)}</select>{f.kind === 'sort' && <select aria-label={`${f.label} 방향`} value={String(sort.ascending)} onChange={e => change({...sort,ascending:e.target.value === 'true'})}><option value="false">내림차순</option><option value="true">오름차순</option></select>}</> : f.kind === 'checkbox' ? <input aria-label={f.label} type="checkbox" checked={Boolean(v)} onChange={e => change(e.target.checked)}/> : f.kind === 'tri_state' ? <select aria-label={f.label} value={String(v || 'IGNORE')} onChange={e => change(e.target.value)}><option value="IGNORE">상관없음</option><option value="INCLUDE">포함</option><option value="EXCLUDE">제외</option></select> : <input aria-label={f.label} value={String(v ?? '')} maxLength={2000} onChange={e => change(e.target.value)}/>}
+        {f.kind === 'select' || f.kind === 'sort' ? <><Select aria-label={f.label} value={String(f.kind === 'sort' ? sort.index : Number(v ?? 0))} onChange={value => change(f.kind === 'sort' ? {...sort,index:Number(value)} : Number(value))} options={(f.options ?? []).map((label, index) => ({value:String(index),label}))} />{f.kind === 'sort' && <Select aria-label={`${f.label} 방향`} value={String(sort.ascending)} onChange={value => change({...sort,ascending:value === 'true'})} options={[{value:'false',label:'내림차순'},{value:'true',label:'오름차순'}]} />}</> : f.kind === 'checkbox' ? <input aria-label={f.label} type="checkbox" checked={Boolean(v)} onChange={e => change(e.target.checked)}/> : f.kind === 'tri_state' ? <Select aria-label={f.label} value={String(v || 'IGNORE')} onChange={change} options={[{value:'IGNORE',label:'상관없음'},{value:'INCLUDE',label:'포함'},{value:'EXCLUDE',label:'제외'}]} /> : <input aria-label={f.label} value={String(v ?? '')} maxLength={2000} onChange={e => change(e.target.value)}/>}
       </label>;
     })}
     <Button type="button" onClick={() => onChange(undefined)}>조건 초기화</Button>

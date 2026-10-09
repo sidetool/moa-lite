@@ -8,7 +8,7 @@
     "build": "tsx build.ts",
     "dev": "node --env-file-if-exists=../../.env --import tsx server/dev.ts",
     "test": "tsx --test test/*.test.ts",
-    "test:browser": "tsx test/browser.ts && tsx test/regressions.ts && tsx test/connector-browser.ts",
+    "test:browser": "tsx test/pip-dropdown-browser.ts && tsx test/subtitle-import-browser.ts && tsx test/browser.ts && tsx test/regressions.ts && tsx test/connector-browser.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify:vercel": "tsx test/vercel.ts"
   },
@@ -21,6 +21,7 @@
     "@noble/ciphers": "2.4.0",
     "@noble/hashes": "2.0.1",
     "buffer": "6.0.3",
+    "fflate": "0.8.2",
     "linkedom": "0.18.12",
     "quickjs-emscripten-core": "0.32.0",
     "sql.js": "1.14.0"

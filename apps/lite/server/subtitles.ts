@@ -6,7 +6,7 @@ type Factory = (options: SubtitleClientOptions) => Pick<SubtitleClient, 'searchS
 export async function searchOnlineSubtitles(query: SubtitleQuery, signal: AbortSignal, factory: Factory = createSubtitleClient) {
   const issues: OnlineSubtitleIssue[] = [];
   let partial = false;
-  const client = factory({ maxResponseBytes: 2 * 1024 * 1024, maxZipBytes: 4 * 1024 * 1024, onDiagnostic(d) {
+  const client = factory({ maxRequests: 64, maxResponseBytes: 2 * 1024 * 1024, maxZipBytes: 4 * 1024 * 1024, onDiagnostic(d) {
     if (['timeout', 'error', 'aborted'].includes(d.code)) partial = true;
     const kind: OnlineSubtitleIssue['kind'] = /HTTP (401|403)\b/.test(d.message ?? '') ? 'access-denied'
       : d.code === 'timeout' || d.code === 'aborted' ? 'timeout' : d.code === 'not-found' ? 'not-found' : 'fetch-failed';

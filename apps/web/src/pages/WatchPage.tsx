@@ -1,11 +1,14 @@
+import { documentPipSupported, useDocumentPip } from "../player/document-pip";
+import { createPortal } from "react-dom";
+import { importSubtitleFile, SUBTITLE_FILES } from '../player/subtitle-files';
 import { preparePlayback, retirePlayback } from '../player/session-lifecycle';
-import { subtitlesOffForTitle, rememberSubtitlesOff, subtitleOffsetForTitle, rememberSubtitleOffset } from "../player/subtitle-preference";
+import { subtitlesOffForTitle, rememberSubtitlesOff, subtitleOffsetForTitle, rememberSubtitleOffset, subtitlePreference, rememberSubtitle, restoreSubtitle } from "../player/subtitle-preference";
 import { enterFullscreen } from "../lib/playback-fullscreen";
 import { devicePrefs, setDevicePref } from "../lib/device-prefs";
 import { isRemoteMode, type RemotePlayerEvent } from "../lib/remote";
 import { PlaybackSources } from '../components/PlaybackSources';
 import {
-  ArrowLeft, Captions, Check, ChevronLeft, ChevronRight, CloudDownload, ExternalLink, FastForward, Pencil, Search, ListVideo, Maximize, Minimize, Pause, PictureInPicture2,
+  ArrowLeft, Captions, Check, ChevronLeft, ChevronRight, CloudDownload, FileUp, ExternalLink, FastForward, Pencil, Search, ListVideo, Maximize, Minimize, Pause, PictureInPicture2,
   Play, Rewind, RotateCcw, RotateCw, Settings, Shuffle, SkipForward, SlidersHorizontal, Volume1, Volume2, VolumeX, X
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -85,15 +88,25 @@ function useNoPageZoom() {
   }, []);
 }
 
+type SubtitleCarry = { episodeId: string; track: SubtitleTrack | null; offset: number };
+
 export function WatchPage() {
   useNoPageZoom();
   const { episodeId = "" } = useParams();
   const fullscreenHost = useRef<HTMLDivElement>(null);
+  const [carry, setCarry] = useState<SubtitleCarry | null>(null);
+  const uploadUrls = useRef(new Set<string>());
+  useEffect(() => () => { for (const url of uploadUrls.current) URL.revokeObjectURL(url); uploadUrls.current.clear(); }, []);
+  // A stable portal slot can move into a Document PiP window without remounting the player.
+  const [slot] = useState(() => Object.assign(document.createElement("div"), { className: "watch-player-slot" }));
+  useLayoutEffect(() => { if (slot.ownerDocument === document) fullscreenHost.current?.append(slot); }, [slot]);
+  const pip = useDocumentPip(slot, fullscreenHost);
   // The fullscreen target survives episode changes; only playback state resets.
-  return <div className="watch-fullscreen-host" ref={fullscreenHost}><WatchPlayer key={episodeId} episodeId={episodeId} fullscreenHost={fullscreenHost} /></div>;
+  return <div className="watch-fullscreen-host" ref={fullscreenHost}>{createPortal(<WatchPlayer key={episodeId} episodeId={episodeId} fullscreenHost={fullscreenHost} pip={pip} carry={carry?.episodeId === episodeId ? carry : null} onCarry={setCarry} uploadUrls={uploadUrls} />, slot)}</div>;
 }
 
-function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscreenHost: RefObject<HTMLDivElement | null> }) {
+function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCarry, uploadUrls }: { carry: SubtitleCarry | null; onCarry: (carry: SubtitleCarry | null) => void; uploadUrls: RefObject<Set<string>>; episodeId: string; fullscreenHost: RefObject<HTMLDivElement | null>; pip: ReturnType<typeof useDocumentPip> }) {
+  const pipWindow = documentPip.pipWindow;
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -103,6 +116,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const media = useMedia(session?.mediaId ?? "");
 
   const root = useRef<HTMLDivElement>(null);
+  const active = () => (root.current?.ownerDocument ?? document).activeElement;
   const video = useRef<HTMLVideoElement>(null);
   const engine = useRef<EngineHandle | null>(null);
   const subs = useRef<SubtitleController | null>(null);
@@ -128,7 +142,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const resumePlaying = useRef<boolean | null>(null);
   const failPlayback = useRef<(message:string)=>void>(()=>{});
   const [fatal, setFatal] = useState<string | null>(null);
-  const [subtitle, setSubtitle] = useState<SubtitleTrack | null>(null);
+  const [subtitle, setSubtitle] = useState<SubtitleTrack | null>(() => carry?.track ?? null);
   const [resumeChip, setResumeChip] = useState(false);
   const [nextDismissed, setNextDismissed] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -156,12 +170,17 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     setAppearance(value); try { localStorage.setItem('moa.subtitleAppearance', JSON.stringify(value)); } catch {}
   };
   useEffect(() => { void subs.current?.setAppearance({size:subSize,background:subBackground}).catch(() => {}); }, [subSize,subBackground,subtitle,session]);
-  const [extraSubs, setExtraSubs] = useState<SubtitleTrack[]>([]);
+  const [extraSubs, setExtraSubs] = useState<SubtitleTrack[]>(() => carry?.track ? [carry.track] : []);
   const [online, setOnline] = useState<{ status: "idle" | "searching" | "done" | "error"; result?: OnlineSubtitleSearch; applying?: string }>({ status: "idle" });
   const [notice, setNotice] = useState<string | { text: string; action: { label: string; run: () => void } } | null>(null);
   const onlineAbort = useRef<AbortController | null>(null);
   const applyAbort = useRef<AbortController | null>(null);
-  const subtitleChoice = useRef(0);
+  // Reserve the carried choice before a resumed translation can return its first cue.
+  const subtitleChoice = useRef(carry ? 1 : 0);
+  const [importing, setImporting] = useState(false);
+  const subtitleInput = useRef<HTMLInputElement>(null);
+  const uploadAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => { uploadAbort.current?.abort(); }, [episodeId]);
   const initializedSubtitles = useRef<PlaybackSession | null>(null);
 
   useEffect(()=>{if(sourcePicker) video.current?.pause();},[sourcePicker]);
@@ -170,12 +189,14 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const titleLine = session ? [session.mediaTitle, session.episodeLabel && `${session.episodeLabel}${session.episodeTitle ? ` ${episodeTitle(session.episodeTitle)}` : ""}`].filter(Boolean) : [];
 
   /* ---------- progress ---------- */
-  const saveProgress = useCallback((keepalive = false) => {
-    const v = video.current;
+  const saveProgress = useCallback((keepalive = false, v = video.current) => {
     if (!session || session.live || !v || !Number.isFinite(v.duration) || !v.duration || v.currentTime < 1) return;
     lastSaved.current = v.currentTime;
-    void api("/progress", { method: "POST", body: { episodeId: session.episodeId, position: v.currentTime, duration: v.duration || session.duration }, keepalive }).catch(() => {});
-  }, [session]);
+    void api("/progress", { method: "POST", body: { episodeId: session.episodeId, position: v.currentTime, duration: v.duration || session.duration }, keepalive }).then(() => {
+      for (const queryKey of [["home"], ["history"], ["media", session.mediaId]])
+        void client.invalidateQueries({ queryKey, refetchType: keepalive ? "active" : "none" });
+    }).catch(() => {});
+  }, [session, client]);
 
   /* ---------- attach ---------- */
   useEffect(() => {
@@ -219,13 +240,11 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     return () => {
       disposed = true;
       failPlayback.current = ()=>{};
-      saveProgress(true);
+      saveProgress(true, v);
       engine.current?.destroy();
       engine.current = null;
       subs.current?.destroy();
       subs.current = null;
-      void client.invalidateQueries({ queryKey: ["home"] });
-      void client.invalidateQueries({ queryKey: ["media", session.mediaId] });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
@@ -258,9 +277,22 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   useEffect(() => {
     if (!session || !settings || initializedSubtitles.current === session) return;
     initializedSubtitles.current = session;
+    const remembered = subtitlePreference(episodeId);
+    if (remembered !== undefined) {
+      subtitleChoice.current ||= 1;
+      if (remembered === null) { setSubtitle(null); return; }
+      const controller = new AbortController(), choice = subtitleChoice.current;
+      void restoreSubtitle(episodeId, [...session.subtitles, ...extraSubs], remembered, controller.signal).then(track => {
+        if (controller.signal.aborted || choice !== subtitleChoice.current) return;
+        if (track) setExtraSubs(list => [...list.filter(item => item.id !== track.id), track]);
+        setSubtitle(track);
+        setNotice(track ? null : "이전에 사용한 자막이 없어졌어요. 다른 자막을 선택해 주세요.");
+      }).catch(() => { if (!controller.signal.aborted && choice === subtitleChoice.current) setNotice("이전에 사용한 자막을 불러오지 못했어요. 다시 선택해 주세요."); });
+      return () => { controller.abort(); if (initializedSubtitles.current === session) initializedSubtitles.current = null; };
+    }
     if (subtitleChoice.current) {
       // A new playback session revokes embedded subtitle URLs from the old one.
-      setSubtitle(current => current ? session.subtitles.find(track => track.id === current.id) ?? (current.provenance || isTranslationTrack(current) ? current : null) : null);
+      setSubtitle(current => current ? session.subtitles.find(track => track.id === current.id) ?? (current.provenance || isTranslationTrack(current) || current.source === 'upload' ? current : null) : null);
       return;
     }
     const preferred = settings.defaultSubtitleLang;
@@ -297,14 +329,16 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     const list = session?.subtitles ?? [];
     return [...list, ...extraSubs.filter(extra => !list.some(track => track.id === extra.id))];
   }, [session, extraSubs]);
-  const searchOnline = useCallback(async (manual?: OnlineSubtitleQuery) => {
+  const searchOnline = useCallback(async (manual?: OnlineSubtitleQuery, refresh = false) => {
     if (!session) return null;
     onlineAbort.current?.abort();
     const controller = new AbortController();
     onlineAbort.current = controller;
     setOnline({ status: "searching" });
     try {
-      const params = manual ? `?${new URLSearchParams({ title: manual.title.trim(), season: String(manual.season), episode: String(manual.episode), episodeOffset: String(manual.episodeOffset) })}` : "";
+      const search = new URLSearchParams(manual ? { title: manual.title.trim(), season: String(manual.season), episode: String(manual.episode), episodeOffset: String(manual.episodeOffset) } : {});
+      if (refresh) search.set("refresh", "1");
+      const params = search.size ? `?${search}` : "";
       const result = await api<OnlineSubtitleSearch>(`/episodes/${encodeURIComponent(session.episodeId)}/subtitles/online${params}`, { signal: controller.signal });
       if (controller.signal.aborted) return null;
       setOnline({ status: "done", result });
@@ -327,6 +361,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
       if (controller.signal.aborted || subtitleChoice.current !== choice) return;
       setExtraSubs(list => [...list.filter(item => item.id !== track.id), track]);
       setSubtitle(track);
+      rememberSubtitle(session.episodeId, track);
       if (!quiet) rememberSubtitlesOff(session.mediaId, false);
       const who = track.provenance?.creatorName ?? result.candidates.find(item => item.id === candidateId)?.creatorName;
       setNotice(quiet ? `${who ? `${who} 님의 ` : ""}한국어 자막을 찾아 적용했어요` : null);
@@ -339,7 +374,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
 
   useEffect(() => {
     // Translations belong to the episode, not the playback session, so they survive audio/stream switches.
-    setExtraSubs(list => list.filter(isTranslationTrack)); setOnline({ status: "idle" }); setNotice(null);
+    setExtraSubs(list => list.filter(track => isTranslationTrack(track) || track.source === 'upload' && uploadUrls.current.has(track.url))); setOnline({ status: "idle" }); setNotice(null);
     return () => { onlineAbort.current?.abort(); applyAbort.current?.abort(); };
   }, [session]);
 
@@ -370,7 +405,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const liveShown = useRef<{ id: string; ranges: TranslatedRange[] } | null>(null);
   const pendingRevision = useRef<{ track: SubtitleTrack; ranges: TranslatedRange[]; since: number } | null>(null);
   const showTranslated = (track: SubtitleTrack) => {
-    if (session) rememberSubtitlesOff(session.mediaId, false);
+    if (session) { rememberSubtitlesOff(session.mediaId, false); rememberSubtitle(session.episodeId, track); }
     applyAbort.current?.abort();
     setSubtitle(track);
   };
@@ -425,11 +460,12 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const liveJob = translation.state.status === "active" ? translation.state.job : null;
   const autoJob = (translation.state.status === "active" || translation.state.status === "reading") && translation.state.origin === "auto";
   // Leaving the episode stops a translation the player started on its own; partial cues stay cached for next time.
+  const handingOff = useRef(false);
   const leaving = useRef({ autoJob, jobId: liveJob?.id, forget: translation.forget });
   leaving.current = { autoJob, jobId: liveJob?.id, forget: translation.forget };
   useEffect(() => () => {
     const { autoJob, jobId, forget } = leaving.current;
-    if (!autoJob || !jobId) return;
+    if (handingOff.current || !autoJob || !jobId) return;
     forget();
     rememberAuto(episodeId, "started");
     void cancelTranslationJob(jobId, true).catch(() => {});
@@ -494,7 +530,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   const translatingHere = showingLive && !live && untranslatedGap(liveJob!.translatedRanges, time, total);
 
   const chooseSubtitle = (track: SubtitleTrack | null) => {
-    if (session) rememberSubtitlesOff(session.mediaId, !track);
+    if (session) { rememberSubtitlesOff(session.mediaId, !track); rememberSubtitle(session.episodeId, track); }
     subtitleChoice.current++;
     applyAbort.current?.abort();
     setOnline(state => ({ ...state, applying: undefined }));
@@ -505,6 +541,33 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     setSubtitle(track && live?.track?.id === track.id ? live.track : track);
     // Turning subtitles off also stops a translation the player started on its own (it would only cost money).
     if (!track && autoJob) { void cancelTranslation(); setNotice("자막을 꺼서 자동 번역을 멈췄어요"); }
+  };
+
+  const addSubtitleFiles = async (files: File[]) => {
+    if (!files.length) return;
+    const choice = ++subtitleChoice.current;
+    uploadAbort.current?.abort();
+    applyAbort.current?.abort();
+    const controller = new AbortController();
+    uploadAbort.current = controller;
+    const tracks: SubtitleTrack[] = [];
+    setImporting(true); setNotice(null);
+    try {
+      if (files.length > 32 || uploadUrls.current.size >= 64) throw new Error('자막은 한 번에 32개, 재생 중 64개까지 가져올 수 있어요.');
+      for (const file of files) {
+        tracks.push(...await importSubtitleFile(file, controller.signal));
+        if (tracks.length > 32 || uploadUrls.current.size + tracks.length > 64) throw new Error('가져올 수 있는 자막 수를 초과했어요.');
+      }
+      controller.signal.throwIfAborted();
+      tracks.forEach(track => uploadUrls.current.add(track.url));
+      setExtraSubs(list => [...list, ...tracks]);
+      if (tracks.length === 1 && subtitleChoice.current === choice) chooseSubtitle(tracks[0]);
+      else setNotice('가져온 자막 중 사용할 파일을 선택해 주세요.');
+      setPanel('subs');
+    } catch (error) {
+      tracks.forEach(track => URL.revokeObjectURL(track.url));
+      if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : '자막 파일을 읽지 못했어요.');
+    } finally { if (uploadAbort.current === controller) setImporting(false); }
   };
 
   useEffect(() => {
@@ -521,7 +584,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   // Timing usually matches across a release group's episodes, so the offset follows the title.
   useEffect(() => {
     if (!session) return;
-    const saved = devicePrefs().rememberSubOffset ? subtitleOffsetForTitle(session.mediaId) : 0;
+    const saved = carry?.offset ?? (devicePrefs().rememberSubOffset ? subtitleOffsetForTitle(session.mediaId) : 0);
     subOffsetRef.current = saved; setSubOffset(saved);
     subs.current?.setOffset(saved);
   }, [session?.mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -602,14 +665,22 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
   };
   const toggleMute = () => { const v = video.current; if (!v) return; v.muted = !v.muted; setMuted(v.muted); };
   const toggleFullscreen = useCallback(async () => {
+    if (pipWindow) return;
     if (document.fullscreenElement) { await document.exitFullscreen().catch(() => {}); return; }
     if (fullscreenHost.current) await enterFullscreen(fullscreenHost.current).catch(() => {});
-  }, []);
+  }, [pipWindow]);
   const pip = async () => {
     const v = video.current;
     if (!v) return;
+    if (pipWindow) { pipWindow.close(); return; }
+    if (documentPipSupported() && !document.pictureInPictureElement) {
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      const width = Math.min(960, Math.max(400, Math.round(window.innerWidth / 3)));
+      await documentPip.open(width, Math.round(width * (v.videoHeight || 9) / (v.videoWidth || 16))).catch(() => v.requestPictureInPicture?.().catch(() => {}));
+      return;
+    }
     if (document.pictureInPictureElement) await document.exitPictureInPicture().catch(() => {});
-    else await v.requestPictureInPicture().catch(() => {});
+    else await v.requestPictureInPicture?.().catch(() => {});
   };
   const goNext = useCallback(() => {
     if (!session?.next) return;
@@ -617,6 +688,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     navigate(`/watch/${encodeURIComponent(session.next.episodeId)}`, { replace: true });
   }, [session, navigate, saveProgress]);
   const back = () => {
+    saveProgress(true);
     if (document.fullscreenElement) void document.exitFullscreen();
     if (window.history.state?.idx > 0) navigate(-1);
     else navigate(session ? `/title/${encodeURIComponent(session.mediaId)}` : "/");
@@ -680,7 +752,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
     const onRemote = (raw: Event) => {
       const event = raw as RemotePlayerEvent, key = event.detail.key;
       if (event.defaultPrevented) return;
-      const inOffer = Boolean(document.activeElement?.closest(".translate-offer"));
+      const inOffer = Boolean(active()?.closest(".translate-offer"));
       const handled = () => event.preventDefault();
       if (key.startsWith("Media")) {
         const v=video.current;
@@ -698,18 +770,18 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
         else if (panel === "subs" && subsView !== "main") setSubsView("main");
         else if (panel) setPanel(null);
         else if (autopilot.offer && root.current?.querySelector(".translate-offer")) autopilot.dismiss();
-        else if (chrome) { (document.activeElement as HTMLElement)?.blur(); setChrome(false); }
+        else if (chrome) { (active() as HTMLElement)?.blur(); setChrome(false); }
         else back();
         handled(); return;
       }
       if (panel || sourcePicker) return;
       const sideways = key === "ArrowLeft" || key === "ArrowRight";
-      if (sideways && !live && !inOffer && (document.activeElement?.getAttribute("role") === "slider" || !chrome)) {
+      if (sideways && !live && !inOffer && (active()?.getAttribute("role") === "slider" || !chrome)) {
         nudgeSeek(key === "ArrowLeft" ? -1 : 1, event.detail.original.repeat); poke();
         if (!chrome) requestAnimationFrame(() => bar.current?.focus());
         handled(); return;
       }
-      if (!chrome && !inOffer && (key.startsWith("Arrow") || key === "Enter") && !(key === "Enter" && document.activeElement?.closest(".next-card,.player-error,.player-end,.player-chip,.player-skip"))) {
+      if (!chrome && !inOffer && (key.startsWith("Arrow") || key === "Enter") && !(key === "Enter" && active()?.closest(".next-card,.player-error,.player-end,.player-chip,.player-skip"))) {
         poke(); requestAnimationFrame(()=>root.current?.querySelector<HTMLElement>(".center-play")?.focus());
         handled(); return;
       }
@@ -740,14 +812,24 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
       else if (key === "m") toggleMute();
       else if (key === "n") goNext();
       else if (key === "c") chooseSubtitle(subtitle ? null : allSubs[0] ?? null);
-      else if (key === "escape") { if (panel) setPanel(null); else if (!document.fullscreenElement) back(); }
+      else if (key === "escape") { if (panel) setPanel(null); else if (!document.fullscreenElement && !pipWindow) back(); }
       else if (/^[0-9]$/.test(key)) seekTo((Number(key) / 10) * (v.duration || total));
       else return;
       if (handled) { event.preventDefault(); poke(); }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    pipWindow?.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); pipWindow?.removeEventListener("keydown", onKey); };
   });
+
+  // Observers created by this window do not follow the player into the PiP window's rendering loop.
+  useEffect(() => {
+    if (!pipWindow) return;
+    const relayout = () => subs.current?.refreshLayout();
+    pipWindow.addEventListener("resize", relayout);
+    relayout();
+    return () => { pipWindow.removeEventListener("resize", relayout); requestAnimationFrame(() => subs.current?.refreshLayout()); };
+  }, [pipWindow]);
 
   useEffect(() => {
     const onFs = () => {
@@ -791,11 +873,11 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
       setFillScale(Math.max(screenRatio / videoRatio, videoRatio / screenRatio));
     };
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ((r.ownerDocument.defaultView ?? window) as typeof window).ResizeObserver(update);
     observer.observe(r);
     v.addEventListener("loadedmetadata", update);
     return () => { observer.disconnect(); v.removeEventListener("loadedmetadata", update); };
-  }, [fill, session]);
+  }, [fill, session, pipWindow]);
   const distance = () => { const [a, b] = [...pointers.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
   useEffect(() => () => { window.clearTimeout(tapTimer.current); window.clearTimeout(pressTimer.current); }, []);
 
@@ -912,7 +994,10 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
       className={cx("player", chrome ? "is-chrome" : "is-idle", playing && "is-playing", fill && "is-fill", `cue-${subSize}`, `cue-bg-${subBackground}`)}
       style={{ "--video-height": videoHeight ? `${videoHeight}px` : undefined, "--subtitle-lift": `${chrome ? Math.max(15,subHeight) : subHeight}%` } as React.CSSProperties}
       onPointerMove={event => { if (event.pointerType !== "touch") poke(); }}
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); void addSubtitleFiles(Array.from(event.dataTransfer.files)); } }}
     >
+      <input ref={subtitleInput} type="file" accept={SUBTITLE_FILES} multiple hidden aria-label="자막 파일 선택" onChange={event => { void addSubtitleFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <video
         ref={video}
         className="player-video"
@@ -1049,7 +1134,19 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
         </div>
       )}
 
-      {sourcePicker && <PlaybackSources episodeId={episodeId} position={live?0:video.current?.currentTime || time || session?.startPosition || 0} onClose={()=>setSourcePicker(false)} onPlay={(id,at)=>{saveProgress(true);navigate(`/watch/${encodeURIComponent(id)}?t=${Math.max(0,Math.floor(at))}`);}}/>}
+      {sourcePicker && <PlaybackSources episodeId={episodeId} position={live?0:video.current?.currentTime || time || session?.startPosition || 0} onClose={()=>setSourcePicker(false)} onPlay={(id,at,sameEpisode)=>{
+        saveProgress(true);
+        // A queued translation has no track yet; transfer its job independently
+        // of whichever subtitle is currently displayed.
+        handingOff.current = sameEpisode && translation.handoff(id);
+        const transferable = sameEpisode && (isTranslationTrack(subtitle) || subtitle?.source === 'upload' || subtitle?.source === 'online');
+        const off = sameEpisode && subtitlePreference(episodeId) === null;
+        if (transferable || off) {
+          rememberSubtitle(id, transferable ? subtitle : null, subtitlePreference(episodeId)?.episodeId ?? episodeId);
+          onCarry({ episodeId: id, track: transferable ? subtitle : null, offset: subOffset });
+        } else onCarry(null);
+        navigate(`/watch/${encodeURIComponent(id)}?t=${Math.max(0,Math.floor(at))}`);
+      }}/>}
       <footer className="player-bottom">
         {!live && <div className="seek" ref={bar} onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerLeave={() => setHover(null)}
           role="slider" aria-label="재생 위치" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(shown)} aria-valuetext={clock(shown)} tabIndex={0}>
@@ -1083,8 +1180,8 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
               <button className={cx("icon-btn icon-btn-l", panel === "subs" && "is-active")} aria-label="자막 및 음성" title="자막 및 음성 (C)" onClick={() => setPanel(panel === "subs" ? null : "subs")}><Captions size={26} /></button>
             )}
             <button className={cx("icon-btn icon-btn-l", panel === "settings" && "is-active")} aria-label="재생 설정" title="재생 설정" onClick={() => setPanel(panel === "settings" ? null : "settings")}><Settings size={26} /></button>
-            {"pictureInPictureEnabled" in document && <button className="icon-btn icon-btn-l hide-mobile" aria-label="PIP" title="PIP" onClick={() => void pip()}><PictureInPicture2 size={26} /></button>}
-            <button className="icon-btn icon-btn-l" aria-label="전체 화면 (F)" title="전체 화면 (F)" onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize size={26} /> : <Maximize size={26} />}</button>
+            {("pictureInPictureEnabled" in document || documentPipSupported()) && <button className={cx("icon-btn icon-btn-l hide-mobile", pipWindow && "is-active")} aria-label={pipWindow ? "PIP 닫기" : "PIP"} title={pipWindow ? "PIP 닫기" : "PIP"} onClick={() => void pip()}><PictureInPicture2 size={26} /></button>}
+            {!pipWindow && <button className="icon-btn icon-btn-l" aria-label="전체 화면 (F)" title="전체 화면 (F)" onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize size={26} /> : <Maximize size={26} />}</button>}
           </div>
         </div>
       </footer>
@@ -1123,19 +1220,21 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
                       : <><span>{trackName(track)}</span>{track.format === "ass" && <small>ASS</small>}</>}
                   </button>
                 ))}
+                <button className="opt opt-action" disabled={importing} onClick={() => subtitleInput.current?.click()}>{importing ? <Spinner size={18} /> : <FileUp size={18} />}<span>{importing ? '자막을 읽는 중…' : '자막 파일 선택'}<small>파일을 끌어 놓아도 돼요 · 이 기기에서만 사용</small></span></button>
                 <TranslationEntry config={translationConfig} admin={admin} state={translation.state} tracks={allSubs} onOpen={() => { autopilot.hide(); setSubsView("translate"); }} />
                 <div className="online-subs">
                   {online.status === "idle" && (
-                    <button className="opt opt-action" onClick={() => void searchOnline()}><CloudDownload size={18} /><span>온라인에서 한국어 자막 찾기</span></button>
+                    <button className="opt opt-action" onClick={() => void searchOnline(undefined, true)}><CloudDownload size={18} /><span>온라인에서 한국어 자막 찾기</span></button>
                   )}
                   {online.status === "searching" && (
                     <div className="online-searching" role="status"><Spinner size={16} /><span>한국어 자막을 찾는 중…</span></div>
                   )}
                   {online.status === "error" && (
-                    <button className="opt opt-action" onClick={() => void searchOnline()}><RotateCw size={18} /><span>찾지 못했어요 · 다시 시도</span></button>
+                    <button className="opt opt-action" onClick={() => void searchOnline(undefined, true)}><RotateCw size={18} /><span>찾지 못했어요 · 다시 시도</span></button>
                   )}
                   {online.status === "done" && online.result && (
                     <>
+                      <button className="opt opt-action" onClick={() => void searchOnline(online.result?.query, true)}><RotateCw size={18} /><span>다시 검색</span></button>
                       <h4>온라인 한국어 자막{online.result.partial ? <small> · 일부 응답 없음</small> : null}</h4>
                       {online.result.query && (
                         <button className="online-query" onClick={() => { setSubQuery(online.result!.query!); setSubsView("search"); }} aria-label="검색 조건 바꾸기">
@@ -1216,7 +1315,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
               onApply={track => { chooseSubtitle(track); setSubsView("main"); }} />
           )}
           {panel === "subs" && subsView === "search" && subQuery && (
-            <form className="panel-body panel-form sub-search" onSubmit={event => { event.preventDefault(); if (!subQuery.title.trim()) return; setSubsView("main"); void searchOnline({ ...subQuery, mapping: "manual" }); }}>
+            <form className="panel-body panel-form sub-search" onSubmit={event => { event.preventDefault(); if (!subQuery.title.trim()) return; setSubsView("main"); void searchOnline({ ...subQuery, mapping: "manual" }, true); }}>
               <label className="pf-block">
                 <span className="pf-label">작품 제목</span>
                 <input className="pf-input" value={subQuery.title} maxLength={500} placeholder="예: 주술회전" onChange={e => setSubQuery({ ...subQuery, title: e.target.value })} />
@@ -1228,7 +1327,7 @@ function WatchPlayer({ episodeId, fullscreenHost }: { episodeId: string; fullscr
               <Stepper label="이전 시즌까지의 화수" unit="화" value={subQuery.episodeOffset} min={0} max={10000} onChange={episodeOffset => setSubQuery({ ...subQuery, episodeOffset })} />
               <p className="panel-note">영어 사이트는 화수를 처음부터 이어 세는 경우가 많아요. 예를 들어 ‘25화’가 실제로는 주술회전 2기 1화라면 시즌 2, 화수 1, 이전 시즌까지 24화로 맞춰 주세요. 자막 블로그에 ‘25화’로 올라온 자막도 함께 찾아요.</p>
               <div className="sub-search-actions">
-                <button type="button" className="pf-reset" onClick={() => { setSubsView("main"); void searchOnline(); }}>자동으로 다시 찾기</button>
+                <button type="button" className="pf-reset" onClick={() => { setSubsView("main"); void searchOnline(undefined, true); }}>자동으로 다시 찾기</button>
                 <Button type="submit" variant="primary" icon={<Search size={16} />} disabled={!subQuery.title.trim()}>이 조건으로 찾기</Button>
               </div>
             </form>

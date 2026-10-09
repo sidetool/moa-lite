@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Episode } from '@moa/shared';
 import { parseName, matchSubtitles } from '../src/filename.js';
-import { completion, playTarget, summary } from '../src/progress.js';
+import { completion, continueTarget, playTarget, summary } from '../src/progress.js';
 import { safePath, normalize } from '../src/util.js';
 import { playbackMode } from '../src/playback.js';
 import { smiToVtt } from '../src/subtitles.js';
@@ -44,8 +44,8 @@ test('play target resumes latest unfinished episode, advances, and replays compl
   assert.deepEqual(playTarget([]), null);
   assert.deepEqual(playTarget([ep(2), ep(1)]), { episodeId: 'ep1', position: 0, label: '재생' });
   assert.deepEqual(playTarget([ep(1, 500), ep(3, 680, false, '2026-10-03T00:00:00Z')]), { episodeId: 'ep3', position: 680, label: '이어보기 S2:E3' });
-  assert.deepEqual(playTarget([ep(1, 1400, true), ep(2)]), { episodeId: 'ep2', position: 0, label: '재생' });
-  assert.deepEqual(playTarget([ep(1), ep(2, 1400, true), ep(3)]), { episodeId: 'ep3', position: 0, label: '재생' });
+  assert.deepEqual(playTarget([ep(1, 1400, true), ep(2)]), { episodeId: 'ep2', position: 0, label: '다음 회차 S2:E2' });
+  assert.deepEqual(playTarget([ep(1), ep(2, 1400, true), ep(3)]), { episodeId: 'ep3', position: 0, label: '다음 회차 S2:E3' });
   assert.deepEqual(playTarget([ep(1, 1400, true), ep(2, 1400, true)]), { episodeId: 'ep1', position: 0, label: '다시 보기' });
   assert.equal(playTarget([ep(1, 200)], true)?.label, '이어보기');
   assert.equal(summary(ep(3), { position: 680, duration: 1400, completed: false, updatedAt: '' }, false).label, 'S2:E3 · 12분 남음');
@@ -85,4 +85,19 @@ test('search normalization preserves Hangul and removes separators/width differe
 });
 test('SMI conversion retains line breaks and timed empty clearing cues', () => {
   assert.equal(smiToVtt('<SYNC Start=1000><P>안녕<br>세계<SYNC Start=2300><P>&nbsp;'), 'WEBVTT\n\n00:00:01.000 --> 00:00:02.300\n안녕\n세계\n');
+});
+
+test('continue target follows latest activity, crosses seasons, never invents history', () => {
+  const older = ep(1, 200, false, '2026-10-01');
+  const last = ep(2, 1350, true, '2026-10-02');
+  const next = { ...ep(1), id: 's3e1', season: 3 };
+  const episodes = [next, last, older];
+  const before = JSON.stringify(episodes);
+  assert.deepEqual(continueTarget(episodes), {episodeId:'s3e1',position:0,kind:'next',label:'다음 회차 S3:E1'});
+  assert.equal(JSON.stringify(episodes), before);
+  assert.equal(continueTarget([last, older]), null, 'old unfinished episodes do not override latest completion');
+  assert.equal(continueTarget([last],true), null);
+  assert.equal(continueTarget([ep(1)]), null);
+  const rewatch = ep(1,100,false,'2026-10-03');
+  assert.equal(continueTarget([rewatch,last,next])?.episodeId,rewatch.id);
 });

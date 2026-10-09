@@ -17,6 +17,13 @@ await mkdir(join(root, 'apps/web/public/install'), { recursive: true });
 await copyFile(require.resolve('sql.js/dist/sql-wasm.wasm'), join(output, 'sql-wasm.wasm'));
 await copyFile(require.resolve('@jitl/quickjs-wasmfile-release-sync/wasm'), join(output, 'quickjs.wasm'));
 const client = (file: string) => join(root, 'apps/lite/client', file);
+const subtitleRequire = createRequire(join(root, 'packages/subtitles-ko/package.json'));
+for (const name of ['7zz.umd.js', '7zz.wasm']) await copyFile(subtitleRequire.resolve('7z-wasm/' + name), join(output, name));
+for (const name of ['License.txt', 'unRarLicense.txt']) await copyFile(subtitleRequire.resolve('7z-wasm/' + name), join(output, '7zip-' + name));
+await copyFile(join(root, 'LICENSES/7z-wasm/LGPL-2.1.txt'), join(output, '7zip-LGPL-2.1.txt'));
+await build({ entryPoints: [client('subtitle-import-worker.ts')], outfile: join(output, 'subtitle-import-worker.js'), bundle: true,
+  platform: 'browser', format: 'iife', target: 'es2022', minify: true, inject: [client('globals.ts')],
+  alias: { cheerio: subtitleRequire.resolve('cheerio/slim'), 'iconv-lite': client('subtitle-encoding.ts') }, logLevel: 'info' });
 const browserPlugin = { name: 'moa-browser-host', setup(builder: any) {
   builder.onResolve({ filter: /^node:/ }, ({ path }: any) => ({ path: client(path === 'node:crypto' ? 'crypto.ts' : path === 'node:timers/promises' ? 'timers.ts' : 'platform.ts') }));
   builder.onResolve({ filter: /^@moa\/(?:extensions|subtitles-ko)$/ }, ({ path }: any) => ({ path: client(path === '@moa/extensions' ? 'extensions.ts' : 'subtitles.ts') }));
@@ -29,7 +36,7 @@ if (!/\nexport \{[^}]+\};\s*$/.test(dom)) throw new Error('DOM bundle changed');
 const realm = '(function(){\n' + dom.replace(/\nexport \{[^}]+\};\s*$/, '\nglobalThis.__moaParseHTML=parseHTML;') + '\n})();';
 for (const name of ['source-worker', 'catalog-worker']) await build({ entryPoints: [client(name + (name === 'source-worker' ? '.js' : '.ts'))], outfile: join(output, name + '.js'), bundle: true, platform: 'browser', format: 'esm', target: 'es2022', minify: true, inject: [client('globals.ts')], plugins: [browserPlugin], define: { __MOA_DOM_SOURCE__: JSON.stringify(realm) }, logLevel: 'info' });
 const notices: string[] = [await readFile(join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), await readFile(join(root, 'LICENSE'), 'utf8')];
-for (const name of ['sql.js', 'quickjs-emscripten-core', '@jitl/quickjs-wasmfile-release-sync', 'linkedom', '@noble/hashes', '@noble/ciphers', 'buffer']) {
+for (const name of ['fflate', 'sql.js', 'quickjs-emscripten-core', '@jitl/quickjs-wasmfile-release-sync', 'linkedom', '@noble/hashes', '@noble/ciphers', 'buffer']) {
   const location = dirname(require.resolve(name === 'buffer' ? 'buffer/' : name === '@noble/hashes' ? name + '/sha2.js' : name === '@noble/ciphers' ? name + '/aes.js' : name));
   let license = '';
   for (const candidate of [join(location, 'LICENSE'), join(location, '../LICENSE'), join(location, 'LICENSE.txt'), join(location, '../LICENSE.txt')]) { try { license = await readFile(candidate, 'utf8'); break; } catch {} }

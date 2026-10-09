@@ -16,8 +16,8 @@ const vtt = { format: 'vtt', label: 'VTT', url: '/test.vtt' };
 const ass = { format: 'ass', label: 'ASS', url: '/test.ass' };
 const cue = (startTime = 2, endTime = 4) => ({ startTime, endTime, line: 'auto' });
 
-async function harness({ importGate, readyGate, constructorError, destroyError, swapGates } = {}) {
-  const tracks = [], renderers = [], swaps = [];
+async function harness({ importGate, readyGate, constructorError, destroyError, swapGates, styles = [], events = [] } = {}) {
+  const tracks = [], renderers = [], swaps = [], styleWrites = [], eventWrites = [];
   const video = {
     append(el) { tracks.push(el); },
     get textTracks() { return tracks.map(el => el.track); }
@@ -28,7 +28,11 @@ async function harness({ importGate, readyGate, constructorError, destroyError, 
       this.timeOffset = options.timeOffset;
       this.ready = readyGate?.promise ?? Promise.resolve();
       this.destroyed = 0;
-      this.renderer = { getStyles: async()=>[], setStyle: async()=>{}, setTrackByUrl: async url => { await swapGates?.[url]?.promise; swaps.push(url); } };
+      this.renderer = {
+        getStyles: async () => styles, setStyle: async (style, index) => styleWrites.push({ style, index }),
+        getEvents: async () => events, setEvent: async (event, index) => eventWrites.push({ event, index }),
+        setTrackByUrl: async url => { await swapGates?.[url]?.promise; swaps.push(url); }
+      };
       this._demandRender = async()=>{};
       renderers.push(this);
     }
@@ -63,7 +67,7 @@ async function harness({ importGate, readyGate, constructorError, destroyError, 
   });
   await module.link(() => { throw new Error('Unexpected static import'); });
   await module.evaluate();
-  return { controller: new module.namespace.SubtitleController(video), tracks, renderers, swaps };
+  return { controller: new module.namespace.SubtitleController(video), tracks, renderers, swaps, styleWrites, eventWrites };
 }
 
 test('VTT load applies controls lift with zero offset and supports saved height and keeps a minimum bottom inset', async () => {
@@ -74,11 +78,56 @@ test('VTT load applies controls lift with zero offset and supports saved height 
   tracks[0].dispatchEvent(new Event('load'));
   assert.equal(tracks[0].track.cues[0].line, -3);
   controller.setLift(false);
-  assert.equal(tracks[0].track.cues[0].line, -2);
+  assert.equal(tracks[0].track.cues[0].line, -1);
   controller.setHeight(25);
   assert.equal(tracks[0].track.cues[0].line,-5);
   controller.setHeight(0);
   assert.equal(tracks[0].track.cues[0].line, -1);
+  const positioned = { ...cue(), line: 20, snapToLines: false, lineAlign: 'center' };
+  tracks[0].track.cues = [positioned];
+  controller.setLift(true);
+  assert.equal(positioned.line, 20);
+  assert.equal(positioned.snapToLines, false);
+  controller.setHeight(25);
+  assert.ok(positioned.line < 0);
+  controller.setHeight(0);
+  assert.equal(positioned.line, 20);
+});
+
+test('ASS defaults preserve authored styles and background overrides restore inline tags exactly', async () => {
+  const style = { FontSize: 32, BorderStyle: 1, Outline: 3, Shadow: 1, OutlineColour: 0xff, BackColour: 0xff, Alignment: 8, MarginV: 24 };
+  const event = { Text: '{\\pos(60,40)\\bord0\\shad0\\3a&HFF&\\alpha&H80&}SIGN{\\rDefault\\3c&HFFFFFF&} subtitle', Start: 0, Duration: 3000 };
+  const { controller, styleWrites, eventWrites } = await harness({ styles: [style], events: [event] });
+  await controller.show(ass);
+  await controller.setAppearance({ size: 'medium', background: 'original' });
+  assert.equal(styleWrites.length, 0);
+  assert.equal(eventWrites.length, 0);
+  await controller.setAppearance({ size: 'medium', background: 'soft' });
+  assert.equal(styleWrites.at(-1).style.BorderStyle, 3);
+  assert.equal(styleWrites.at(-1).style.OutlineColour, 0x80);
+  assert.equal(styleWrites.at(-1).style.Alignment, 8);
+  assert.equal(eventWrites.at(-1).event.Text, '{\\pos(60,40)\\1a&H80&\\2a&H80&}SIGN{\\rDefault} subtitle');
+  await controller.setAppearance({ size: 'large', background: 'solid' });
+  assert.equal(styleWrites.at(-1).style.FontSize, 32 * 1.3);
+  assert.equal(styleWrites.at(-1).style.BackColour, 0);
+  await controller.setAppearance({ size: 'medium', background: 'original' });
+  assert.equal(JSON.stringify(styleWrites.at(-1).style), JSON.stringify(style));
+  assert.equal(eventWrites.at(-1).event.Text, event.Text);
+  const writes = styleWrites.length;
+  await controller.setAppearance({ size: 'medium', background: 'original' });
+  assert.equal(styleWrites.length, writes);
+});
+
+test('VTT offset waits for cues when a loading track exposes an empty cue list', async () => {
+  const { controller, tracks } = await harness();
+  await controller.show(vtt);
+  tracks[0].track.cues = [];
+  controller.setOffset(.5);
+  tracks[0].track.cues = [cue(0, 7)];
+  tracks[0].dispatchEvent(new Event('load'));
+  assert.equal(tracks[0].track.cues[0].startTime, .5);
+  controller.setOffset(.5);
+  assert.equal(tracks[0].track.cues[0].startTime, .5);
 });
 
 test('VTT positive/negative offsets are absolute, survive switches, and apply after load', async () => {

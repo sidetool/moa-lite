@@ -8,7 +8,7 @@ import {
   BATCH_SIZE, patchTranslationConfig, translationErrorMessage, translationKeys, translationModels, TRANSLATION_MAX_KEYS, useTranslationConfig,
   type TranslationConfig, type TranslationConfigPatch
 } from '../api/translation';
-import { Button, IconButton, Skeleton } from './ui';
+import { Button, ConfirmDialog, Select, IconButton, Skeleton } from './ui';
 
 const apiMessage = (error: unknown, fallback: string) => error instanceof ApiError && error.code.startsWith('translation-') ? translationErrorMessage(error.code) : fallback;
 const clampBatch = (value: number) => Math.min(BATCH_SIZE.max, Math.max(BATCH_SIZE.min, Math.round(value) || BATCH_SIZE.default));
@@ -20,6 +20,7 @@ export function TranslationSettings() {
   const { hash } = useLocation();
   const section = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState('');
+  const [removeKey, setRemoveKey] = useState<string | null>(null);
   const [batch, setBatch] = useState<string | null>(null);
   const [models, setModels] = useState<string[] | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -63,6 +64,7 @@ export function TranslationSettings() {
 
   return <section className="settings-group" id="translation" ref={section}>
     <h2>자막 번역</h2>
+    {removeKey && <ConfirmDialog title="번역 키 삭제" confirmLabel="삭제" busy={save.isPending} onClose={() => setRemoveKey(null)} onConfirm={() => save.mutate({removeKeyIds:[removeKey]}, {onSuccess:()=>setRemoveKey(null)})}>저장한 번역 키를 지울까요? 마지막 키를 지우면 번역을 사용할 수 없어요.</ConfirmDialog>}
     <div className="settings-card">
       {config.isPending ? <Skeleton className="folder-sk" /> : config.isError || !c ? <p className="settings-error translation-error" role="alert">번역 설정을 불러오지 못했어요. <button className="text-btn" onClick={() => void config.refetch()}>다시 시도</button></p> : <>
         <div className="setting">
@@ -80,7 +82,7 @@ export function TranslationSettings() {
               <span className="translation-key-order">{i + 1}</span>
               <KeyRound size={16} aria-hidden="true" />
               <code>{key.label}</code>
-              <IconButton label={`${i + 1}번 키 지우기`} disabled={busy} onClick={() => { if (confirm(`${i + 1}번 키(${key.label})를 지울까요?${keys.length === 1 ? ' 마지막 키라 번역을 사용할 수 없게 돼요.' : ''}`)) save.mutate({ removeKeyIds: [key.id] }); }}><Trash2 size={16} /></IconButton>
+              <IconButton label={`${i + 1}번 키 지우기`} disabled={busy} onClick={() => setRemoveKey(key.id)}><Trash2 size={16} /></IconButton>
             </li>)}
           </ol>}
           {room > 0 ? <form className="translation-key-add" onSubmit={e => { e.preventDefault(); if (lines.length && !tooMany) save.mutate({ addKeys: lines }); }}>
@@ -97,9 +99,7 @@ export function TranslationSettings() {
         <div className="setting">
           <div><b>번역 모델</b><small>{c.configured ? '키로 사용할 수 있는 Gemini 모델을 불러와 바꿀 수 있어요.' : '키를 저장하면 모델을 고를 수 있어요.'}</small></div>
           <div className="translation-model">
-            <select className="setting-select" aria-label="번역 모델" value={c.model} disabled={!c.configured || busy} onChange={e => save.mutate({ model: e.target.value })}>
-              {options.map(model => <option key={model} value={model}>{model}</option>)}
-            </select>
+            <Select className="setting-select" aria-label="번역 모델" value={c.model} disabled={!c.configured || busy} onChange={model => save.mutate({ model })} options={options.map(model => ({value: model, label: model}))} />
             <Button type="button" disabled={!c.configured || busy} onClick={() => { setMessage(null); loadModels.mutate(); }}>{loadModels.isPending ? '확인 중…' : models ? '새로고침' : '모델 불러오기'}</Button>
           </div>
         </div>

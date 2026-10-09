@@ -59,7 +59,9 @@ export interface HttpResponse { url: string; status: number; headers: IncomingHt
 export interface HttpOptions { signal: AbortSignal; referer?: string; method?: "GET" | "POST"; body?: string; maxBytes?: number }
 
 export class PublicHttpClient {
-  constructor(readonly timeoutMs = 4000, readonly maxBytes = 20 * 1024 * 1024, private readonly resolver: HostResolver = defaultResolver) {}
+  private requests = 0;
+  private deniedHosts = new Map<string, number>();
+  constructor(readonly timeoutMs = 4000, readonly maxBytes = 20 * 1024 * 1024, private readonly resolver: HostResolver = defaultResolver, private readonly maxRequests = Infinity) {}
 
   async get(raw: string, options: HttpOptions): Promise<HttpResponse> {
     const scope = deadline({ signal: options.signal, timeoutMs: this.timeoutMs });
@@ -70,6 +72,9 @@ export class PublicHttpClient {
       for (let hop = 0; hop <= 4; hop++) {
         scope.signal.throwIfAborted();
         const url = validatePublicUrl(target);
+        const denied = this.deniedHosts.get(url.hostname);
+        if (denied) throw new Error(`HTTP ${denied} from ${url.hostname}`);
+        if (++this.requests > this.maxRequests) throw new ResponseLimitError('Subtitle request budget exhausted');
         const address = await resolvePublicHost(url, scope.signal, this.resolver);
         const response = await this.request(url, address, { ...options, method, body, signal: scope.signal });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -79,6 +84,7 @@ export class PublicHttpClient {
           if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) { method = "GET"; body = undefined; }
           continue;
         }
+        if ([401, 403, 429].includes(response.status)) this.deniedHosts.set(url.hostname, response.status);
         if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status} from ${url.hostname}`);
         return response;
       }

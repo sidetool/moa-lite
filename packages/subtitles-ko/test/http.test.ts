@@ -21,6 +21,23 @@ test("all DNS answers must be public, DNS lookup respects cancellation", async (
   controller.abort(); await assert.rejects(pending);
 });
 
+test('request budget covers concurrent calls and redirects before DNS/transport', async () => {
+  let requests = 0;
+  const client = new PublicHttpClient(100, 1024, async () => [{address: '1.1.1.1', family: 4}], 2);
+  (client as any).request = async () => { requests++; return {status: 302, headers: {location: '/next'}, body: Buffer.alloc(0)}; };
+  const results = await Promise.allSettled([1,2,3].map(() => client.get('https://public.example/', {signal: AbortSignal.timeout(100)})));
+  assert.equal(requests, 2);
+  assert(results.every(result => result.status === 'rejected' && /budget/.test(result.reason.message)));
+});
+
+test('an access-denied host is not retried for every article in one search client', async () => {
+  let requests = 0;
+  const client = new PublicHttpClient(100, 1024, async () => [{address: '1.1.1.1', family: 4}]);
+  (client as any).request = async () => { requests++; return {status: 403, headers: {}, body: Buffer.alloc(0)}; };
+  for (const path of ['one', 'two', 'three']) await assert.rejects(client.get('https://public.example/' + path, {signal: AbortSignal.timeout(100)}), /HTTP 403/);
+  assert.equal(requests, 1);
+});
+
 test("redirect targets and changed DNS are checked before transport", async () => {
   const signal = new AbortController().signal;
   let requests = 0;

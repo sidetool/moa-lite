@@ -3,3 +3,5 @@ These fixtures contain authored test metadata and short synthetic subtitle text,
 A few neutral known titles in tests outside this directory exercise the existing built-in alias/offset and named-season rules. Their responses and identifiers are invented, and all HTTP boundaries are mocked.
 
 `lite-episodes.7z`, `lite-encrypted.7z`, and `lite-episodes.tar` contain authored two-line test subtitles. The TAR also contains a traversal name and a symlink to test rejection; extraction never writes these entries. They let CI verify the WASM decoder without installing archive tools.
+
+`lite-korean.7z` contains two authored SRT files with Korean names and episode suffixes (`구름 정원 1화.srt`, `구름 정원 2화.srt`) to catch lossy Unicode decoding.

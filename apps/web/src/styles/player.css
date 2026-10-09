@@ -454,3 +454,12 @@
   .translate-offer { grid-template-columns: minmax(0, 1fr) auto; }
   .translate-offer-actions { margin-top: 4px; }
 }
+
+.watch-player-slot { display: contents; }
+body.watch-pip { margin: 0; overflow: hidden; background: #000; }
+.subtitle-overlay { position: absolute; z-index: 2; overflow: hidden; pointer-events: none; font: 600 var(--subtitle-font-size, 16px)/1.35 "Pretendard Variable", Pretendard, "Noto Sans CJK JP", sans-serif; color: #fff; }
+.subtitle-cue { position: absolute; white-space: pre-wrap; overflow-wrap: break-word; unicode-bidi: plaintext; }
+.subtitle-cue > span { padding: 0 .12em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.subtitle-overlay[data-background=none] .subtitle-cue > span { text-shadow: 0 1px 3px #000; }
+.subtitle-overlay[data-background=soft] .subtitle-cue > span { background: rgba(0, 0, 0, .5); }
+.subtitle-overlay[data-background=solid] .subtitle-cue > span { background: #000; }

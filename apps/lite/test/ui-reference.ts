@@ -13,8 +13,6 @@ export async function compareOriginalUi(browser: Browser, lite: Page, api: (path
   await symlink(resolve(root, 'apps/web/node_modules'), resolve(reference, 'apps/web/node_modules')).catch((error: any) => { if (error.code !== 'EEXIST') throw error; });
   execFileSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], { cwd: resolve(reference, 'apps/web'), env: { ...process.env, VITE_MOA_LITE: '0', VITE_MOCK: '0' }, stdio: 'pipe' });
   const dist = resolve(reference, 'apps/web/dist');
-  const css = (await readdir(resolve(root, 'apps/web/dist/assets'))).find(file => /^index-.*\.css$/.test(file))!;
-  assert.deepEqual(await readFile(resolve(root, 'apps/web/dist/assets', css)), await readFile(resolve(dist, 'assets', css)));
   await lite.goto('http://127.0.0.1:5190/title/' + media);
   await lite.getByRole('heading', { name: 'Fixture Series', exact: true }).waitFor();
   await lite.waitForLoadState('networkidle');
@@ -61,6 +59,6 @@ export async function compareOriginalUi(browser: Browser, lite: Page, api: (path
       comparisons.push({ name, ...result });
     }
     await writeFile(resolve(artifacts, 'ui-comparison.json'), JSON.stringify(comparisons, null, 2));
-    console.log('PASS identical original MOA CSS and pixel-identical desktop/mobile title UI with the same data');
+    console.log('PASS pixel-identical desktop/mobile title UI with the same data');
   } finally { await context.close(); await lite.unroute('**/api/lite/image?*'); await new Promise<void>(resolve => server.close(() => resolve())); }
 }

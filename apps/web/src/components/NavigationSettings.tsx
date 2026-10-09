@@ -8,7 +8,7 @@ import { useMe } from '../api/queries';
 import { api } from '../lib/api';
 import { defaultTabs, useNavigation } from '../lib/navigation';
 import { cx } from '../lib/format';
-import { Button, ButtonLink, IconButton, Skeleton } from './ui';
+import { Button, ButtonLink, ConfirmDialog, IconButton, Skeleton } from './ui';
 
 const typeLabel = (s: VideoSource) => s.live ? '실시간' : s.type === 'anime' ? '애니' : s.type === 'movie' ? '영화' : '영화·시리즈';
 
@@ -18,6 +18,7 @@ export function NavigationSettings() {
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<NavigationTab | null>(null);
+  const [confirmation, setConfirmation] = useState<NavigationTab | 'reset' | null>(null);
   const save = useMutation({
     mutationFn: (navigation: NavigationTab[]) => api<Settings>('/settings', { method: 'PATCH', body: { navigation } }),
     onMutate: navigation => { client.setQueryData<Settings>(['settings'], old => old ? { ...old, navigation } : old); },
@@ -41,7 +42,6 @@ export function NavigationSettings() {
     setEditing(null);
   };
   const remove = (tab: NavigationTab) => {
-    if (!confirm(`'${tab.name}' 탭을 삭제할까요?`)) return;
     save.mutate(tabs.filter(t => t.id !== tab.id));
     setEditing(null);
   };
@@ -54,7 +54,7 @@ export function NavigationSettings() {
   return <section className="settings-group" id="tabs" aria-labelledby="tabs-title">
     <div className="settings-group-head">
       <h2 id="tabs-title">홈 화면 탭</h2>
-      <button className="text-btn" disabled={pending || save.isPending} onClick={() => { if (confirm('탭 구성을 기본값으로 되돌릴까요?')) save.mutate(defaultTabs(sources)); }}><RotateCcw size={14} />기본값</button>
+      <button className="text-btn" disabled={pending || save.isPending} onClick={() => setConfirmation('reset')}><RotateCcw size={14} />기본값</button>
     </div>
     {pending ? <Skeleton className="folder-sk" /> : error ? <p className="settings-error" role="alert">구성 정보를 불러오지 못했어요.</p> : <>
       <ol className="tab-list">
@@ -79,7 +79,8 @@ export function NavigationSettings() {
       </div>
       <DefaultTabs tabs={tabs} sources={sources} />
     </>}
-    {editing && <TabEditor tab={editing} isNew={!tabs.some(t => t.id === editing.id)} isHome={tabs[0]?.id === editing.id} sources={sources} onSave={commit} onDelete={remove} onClose={() => setEditing(null)} />}
+    {editing && <TabEditor tab={editing} isNew={!tabs.some(t => t.id === editing.id)} isHome={tabs[0]?.id === editing.id} sources={sources} onSave={commit} onDelete={setConfirmation} onClose={() => setEditing(null)} />}
+    {confirmation && <ConfirmDialog title={confirmation === 'reset' ? '탭 초기화' : '탭 삭제'} confirmLabel={confirmation === 'reset' ? '초기화' : '삭제'} onClose={() => setConfirmation(null)} onConfirm={() => { if (confirmation === 'reset') save.mutate(defaultTabs(sources)); else remove(confirmation); setConfirmation(null); }}>{confirmation === 'reset' ? '탭 구성을 기본값으로 되돌릴까요?' : `‘${confirmation.name}’ 탭을 삭제할까요?`}</ConfirmDialog>}
   </section>;
 }
 

@@ -13,6 +13,6 @@
     "smoke": "tsx scripts/smoke.ts",
     "directory:update": "tsx scripts/update-directory.ts"
   },
-  "dependencies": { "cheerio": "1.2.0", "iconv-lite": "0.7.0", "libarchive-wasm": "1.2.0", "yauzl": "3.4.0" },
+  "dependencies": { "cheerio": "1.2.0", "iconv-lite": "0.7.0", "7z-wasm": "1.2.0", "yauzl": "3.4.0" },
   "devDependencies": { "@types/node": "^22.0.0", "@types/yauzl": "^2.10.3", "tsx": "^4.20.0", "typescript": "^5.9.0" }
 }

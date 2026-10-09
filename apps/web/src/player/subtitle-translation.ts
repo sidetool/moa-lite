@@ -230,10 +230,19 @@ export function useSubtitleTranslation(episodeId: string, onTrack: (track: Subti
   /** Stop following the job and drop it from this tab's resume list (the player cancels it separately). */
   const forget = useCallback(() => { run.current?.abort(); remember(null); }, [episodeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handoff = (targetEpisode: string) => {
+    if (state.status !== 'active') return false;
+    try {
+      sessionStorage.setItem(jobKey(targetEpisode), JSON.stringify({ id: state.job.id, label: state.label, origin: state.origin }));
+      if (targetEpisode !== episodeId) sessionStorage.removeItem(jobKey(episodeId));
+      return true;
+    } catch { return false; }
+  };
+
   /** A job for this episode is running or was picked back up from earlier in this tab. */
   const busy = state.status === "reading" || state.status === "active";
   // Leaving the player stops watching the job; the server finishes and keeps the result.
   useEffect(() => () => run.current?.abort(), []);
 
-  return { state, start, cancel, prioritize, forget, busy };
+  return { state, start, cancel, prioritize, forget, handoff, busy };
 }

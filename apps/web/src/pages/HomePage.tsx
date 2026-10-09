@@ -23,7 +23,7 @@ export function HomePage({ localOnly = false }: { localOnly?: boolean }) {
   const feed = useTabFeed(installed, tab);
   // Prefer wide artwork for the banner; posters only fill in when needed.
   const heroPool = installed.length ? [...feed.cards.filter(c => c.backdrop), ...feed.cards.filter(c => !c.backdrop && c.poster)] : home.data?.hero ?? [];
-  const hero = [...(home.data?.hero ?? []).filter(c => c.progress), ...heroPool].filter((c, i, all) => all.findIndex(o => o.id === c.id) === i).slice(0, 6);
+  const hero = [...(home.data?.hero ?? []).filter(c => c.progress || c.resume), ...heroPool].filter((c, i, all) => all.findIndex(o => o.id === c.id) === i).slice(0, 6);
   const rows = home.data?.rows.filter(row => row.items.length > 0) ?? [];
   const heroPending = pending || (installed.length ? feed.pending : home.isPending);
   return <div className="home">

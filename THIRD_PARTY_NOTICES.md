@@ -286,6 +286,8 @@ from https://github.com/hufrea/byedpi under the MIT license.
 Copyright and license: `vendor/byedpi/LICENSE`. Release provenance and checksums:
 `vendor/byedpi/README.md`. This binary is not shipped to browsers.
 
-## Server-only subtitle archive decoder
+## Subtitle archive decoder
 
-`libarchive-wasm@1.2.0` provides the Vercel-compatible archive decoder. Its WASM stays in the server function and is loaded only for 7z/RAR/TAR input. Wrapper and bundled-component notices, upstream build recipe snapshots and binary checksum are in `LICENSES/libarchive-wasm/`. The npm package and integrity are pinned in `pnpm-lock.yaml`.
+`7z-wasm@1.2.0` (7-Zip 24.09) replaces `libarchive-wasm` for Unicode archive filenames. The unmodified decoder is loaded as a separate JS/WASM module in a server worker for online subtitles and a browser worker for local imports. Full supplied licenses and checksums are in [LICENSES/7z-wasm](LICENSES/7z-wasm/README.md). The module uses LGPL-2.1-or-later with the included unRAR restriction; it is not relicensed under MOA's GPL. Package integrity is pinned in `pnpm-lock.yaml`.
+
+`fflate@0.8.2` provides browser ZIP decompression under MIT; its full notice is in `LICENSES/npm/fflate-0.8.2/LICENSE` and the browser runtime notice bundle. ZIP filename decoding uses the original UTF-8/CP949 name bytes.

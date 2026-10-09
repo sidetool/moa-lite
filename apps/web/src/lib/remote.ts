@@ -162,7 +162,7 @@ export function installRemoteNavigation(router: ReturnType<typeof createBrowserR
     if (!arrow && !back && key!=='Enter' && !key.startsWith('Media')) return;
     if (back && event.repeat) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     if (typing && !back && (key==='ArrowLeft'||key==='ArrowRight'||key==='Enter')) return;
-    if (target.matches('select') && (key==='ArrowUp'||key==='ArrowDown'||key==='Enter'||key==='Back')) return;
+    if (target.matches('select,[role="combobox"]') && (key==='ArrowUp'||key==='ArrowDown'||key==='Enter'||key==='Back')) return;
     if (target.matches('input[type="range"]') && (key==='ArrowLeft'||key==='ArrowRight')) { event.stopPropagation(); return; }
     const playerEvent: RemotePlayerEvent = new CustomEvent('moa:remote-key',{detail:{key:back?'Back':key,original:event},cancelable:true});
     window.dispatchEvent(playerEvent);

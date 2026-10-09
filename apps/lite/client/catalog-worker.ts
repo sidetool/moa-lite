@@ -1,4 +1,5 @@
 import { selectPlaybackStream } from './playback-streams.js';
+import { subtitleSearchTtl, reuseSubtitleSearch } from './subtitle-cache.js';
 import { mergeBackground } from './background-state.js';
 import { inlineSubtitle, remoteMediaType, subtitleVtt } from '../../../apps/server/src/remote-media.js';
 import './globals.js';
@@ -10,7 +11,7 @@ import { Sources } from '../../../apps/server/src/sources.js';
 import { TitleGroups } from '../../../apps/server/src/title-groups.js';
 import { Franchises } from '../../../apps/server/src/franchise.js';
 import { Tmdb } from '../../../apps/server/src/tmdb.js';
-import { completion } from '../../../apps/server/src/progress.js';
+import { completion, continueTarget } from '../../../apps/server/src/progress.js';
 import { subtitleQuery } from '../../../apps/server/src/subtitle-query.js';
 import { playbackMediaType } from '../../../apps/server/src/tmdb.js';
 import { subtitleDocument, nextBatch, translatedRanges } from '../../../apps/server/src/translation/subtitle.js';
@@ -27,6 +28,7 @@ const order = Object.keys(primary);
 let database: SqliteDatabase, db: Store, catalog: Catalog, sources: Sources, groups: TitleGroups, franchises: Franchises, tmdb: Tmdb;
 let actor: Account, config: any, syncState: any, shared: any;
 const sessions = new Map<string, PlaybackSession>();
+const resumeHydrated = new Set<string>();
 
 let stamp: string | undefined, published: Uint8Array | undefined, sharedBaseline = '', inRequest = false;
 let checkpointTimer: ReturnType<typeof setTimeout> | undefined;
@@ -75,6 +77,15 @@ function snapshotRows() {
     put('source_media', db.all('SELECT * FROM source_media WHERE media_id=?', id).map(row => ({ ...row, detail_at: 0 })));
     put('tmdb_links', db.all("SELECT * FROM tmdb_links WHERE media_id=? AND status IN ('manual','off')", id));
     const episodes = db.all('SELECT e.* FROM episodes e JOIN progress p ON p.episode_id=e.id WHERE e.media_id=?', id);
+    // Keep one actionable next episode per profile, without inventing viewing history
+    // or synchronizing an entire catalogue just to display Continue Watching.
+    for (const { profile_id } of db.all('SELECT DISTINCT p.profile_id FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE e.media_id=?', id)) {
+      const target = continueTarget(catalog.episodes(id, profile_id), db.get('SELECT type FROM media WHERE id=?', id)?.type === 'movie');
+      if (target && !episodes.some(row => row.id === target.episodeId)) {
+        const next = db.get('SELECT * FROM episodes WHERE id=?', target.episodeId);
+        if (next) episodes.push(next);
+      }
+    }
     put('episodes', episodes);
     for (const episode of episodes) put('source_episodes', db.all('SELECT * FROM source_episodes WHERE episode_id=?', episode.id));
     const row = db.get('SELECT metadata FROM media WHERE id=?', id);
@@ -244,6 +255,17 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
   if (p === '/admin/default-navigation') { admin(); const nav = body.fromProfile ? db.settings(prof).navigation ?? null : body.navigation; db.saveDefaultNavigation(nav); return { navigation: nav }; }
   if (p === '/settings') { if (method === 'PATCH') db.run('INSERT OR REPLACE INTO settings VALUES(?,?)', prof, JSON.stringify({ ...db.settings(prof), ...body, hardwareTranscoding: false })); return { ...db.settings(prof), hardwareTranscoding: false }; }
   if (p === '/home') {
+    // Older devices synced only watched episodes. Repair at most three recent
+    // incomplete catalogues once per worker lifetime; failures leave the existing home data available.
+    const repair = db.all(`SELECT e.media_id, MAX(p.updated_at) AS updated FROM progress p
+      JOIN episodes e ON e.id=p.episode_id JOIN source_media s ON s.media_id=e.media_id
+      WHERE p.profile_id=? AND s.detail_at=0 AND p.completed=1
+      GROUP BY e.media_id ORDER BY updated DESC LIMIT 3`, prof)
+      .filter(row => !resumeHydrated.has(actor.id + ":" + prof + ":" + row.media_id) && !continueTarget(catalog.episodes(row.media_id, prof)))
+      .filter(row => { try { catalog.kids.assert(row.media_id, prof); return db.get('SELECT type FROM media WHERE id=?', row.media_id)?.type !== 'movie'; } catch { return false; } });
+    for (const row of repair) resumeHydrated.add(actor.id + ":" + prof + ":" + row.media_id);
+    await Promise.allSettled(repair.map(row => sources.detail(row.media_id)));
+
     const read = () => catalog.home(prof, q.type as any, q.providers?.split(','), q.continueScope as any);
     let home = read();
     const ids = home.rows.flatMap(row => row.items.map(card => card.id)).filter(id => !db.get('SELECT 1 FROM tmdb_links WHERE media_id=?', id));
@@ -270,6 +292,7 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
   if (p === '/watchlist') return groups.resolve(catalog.watchlist(prof).map(c => c.id), prof);
   if (parts[0] === 'watchlist') { catalog.kids.assert(id, prof); if (method === 'PUT') db.run('INSERT OR IGNORE INTO watchlist VALUES(?,?,?)', prof, id, now()); else db.run('DELETE FROM watchlist WHERE profile_id=? AND media_id=?', prof, id); return; }
   if (p === '/history') return catalog.history(prof, Number(q.page ?? 1));
+  if (parts[0] === 'history' && id === 'media' && parts[2] && method === 'DELETE') { db.run('DELETE FROM progress WHERE profile_id=? AND episode_id IN (SELECT id FROM episodes WHERE media_id=?)', prof, parts[2]); return; }
   if (parts[0] === 'history') { db.run('DELETE FROM progress WHERE profile_id=? AND episode_id=?', prof, id); return; }
   if (p === '/progress') {
     episode(body.episodeId); if (!Number.isFinite(body.position) || body.position < 0 || !Number.isFinite(body.duration) || body.duration <= 0) throw new ApiFailure(400, 'invalid-progress');
@@ -298,7 +321,8 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
     if (parts[2] === 'subtitles') {
       if (parts[3] === 'translate') return startJob(id, prof, body);
       if (parts[3] === 'translations') return db.all('SELECT payload FROM lite_jobs WHERE episode=? AND profile=?', id, prof).map(r => jobView(JSON.parse(r.payload)).track).filter(Boolean);
-      const override = { ...q, ...(q.season !== undefined ? { season: Number(q.season) } : {}), ...(q.episode !== undefined ? { episode: Number(q.episode) } : {}), ...(q.episodeOffset !== undefined ? { episodeOffset: Number(q.episodeOffset) } : {}) };
+      const { refresh: _refresh, ...searchQuery } = q;
+      const override = { ...searchQuery, ...(q.season !== undefined ? { season: Number(q.season) } : {}), ...(q.episode !== undefined ? { episode: Number(q.episode) } : {}), ...(q.episodeOffset !== undefined ? { episodeOffset: Number(q.episodeOffset) } : {}) };
       const query = subtitleQuery(db, ep, override as any);
       if (parts[3] === 'jimaku') {
         if (parts[4] === 'translate') { const value = await host('api', { path: '/lite/jimaku/file', body }); return startJob(id, prof, { ...value, startAt: body.startAt }); }
@@ -311,18 +335,27 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
           const c = (Array.isArray(saved) ? saved : saved?.result?.candidates)?.find((c: any) => c.id === body.candidateId);
           if (!c) throw new ApiFailure(409, 'subtitle-search-expired');
           const uuid = randomUUID(); db.run('INSERT OR IGNORE INTO online_subtitles VALUES(?,?,?,?,?,?,?,?,?)', uuid, id, c.creatorName, c.sourceUrl, c.format, c.content, hash(c.content), randomUUID(), Date.now());
-          return track(c.content, c.format, { id: uuid, label: c.creatorName + ' · 한국어', lang: 'ko', source: 'online', default: true });
+          const applied = db.get('SELECT id FROM online_subtitles WHERE episode_id=? AND creator_name=? AND content_hash=?', id, c.creatorName, hash(c.content));
+          if (!applied) throw new ApiFailure(500, 'subtitle-save-failed');
+          return track(c.content, c.format, { id: applied.id, label: c.creatorName + ' · 한국어', lang: 'ko', source: 'online', default: true });
         }
         const queryKey = JSON.stringify(query);
+        db.run('DELETE FROM lite_searches WHERE expires<=?', Date.now());
         const previous = db.get('SELECT * FROM lite_searches WHERE profile=? AND episode=? AND expires>? ORDER BY expires DESC LIMIT 1', prof, id, Date.now());
         const saved = previous && JSON.parse(previous.payload);
-        // Reuse complete, positive searches only. Failures and partial results remain retryable.
-        const cached = previous && saved?.queryKey === queryKey && saved.result?.candidates?.length && !saved.result.partial;
+        // Short cooldown for failures, longer reuse for successful searches.
+        // Explicit retries bypass both, without changing the title identity.
+        const cached = previous && reuseSubtitleSearch(saved, queryKey, q.refresh === '1');
         const response = cached ? saved.result : await host('api', { path: '/lite/subtitles', body: query });
         // Accept a response from the previous deployment during rolling updates.
         const result = Array.isArray(response) ? { candidates: response, partial: false, issues: [] } : response;
-        const searchId = cached ? previous.id : randomUUID(), expiresAt = cached ? previous.expires : Date.now() + 300000;
+        const searchId = cached ? previous.id : randomUUID(), expiresAt = cached ? previous.expires : Date.now() + subtitleSearchTtl(result);
         if (!cached) db.run('INSERT INTO lite_searches VALUES(?,?,?,?,?)', searchId, prof, id, JSON.stringify({queryKey, result}), expiresAt);
+        let cacheBytes = 0, cacheEntries = 0;
+        for (const entry of db.all('SELECT id,length(CAST(payload AS BLOB)) AS bytes FROM lite_searches ORDER BY rowid DESC')) {
+          cacheBytes += entry.bytes;
+          if (++cacheEntries > 16 || cacheBytes > 8 * 1024 * 1024) db.run('DELETE FROM lite_searches WHERE id=?', entry.id);
+        }
         return { searchId, expiresAt, query, resolvedTitle: query.title, partial: result.partial, issues: result.issues,
           autoApply: !query.warnings.length, candidates: result.candidates.map(({ content: _content, ...c }: any) => c) };
       }

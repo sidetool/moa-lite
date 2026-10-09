@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clapperboard } from 'lucide-react';
 import { api } from '../lib/api';
 import { cx } from '../lib/format';
-import { Button } from './ui';
+import { Button, ConfirmDialog } from './ui';
 
 interface TmdbConfig { configured: boolean; source: 'environment' | 'database' | 'none'; credentialType: 'token' | 'apiKey' | null; hasSavedCredential: boolean }
 type TmdbPatch = { token: string } | { apiKey: string } | { clear: true };
@@ -17,6 +17,7 @@ export function TmdbSettings() {
   const client = useQueryClient();
   const config = useQuery({ queryKey: tmdbKey, queryFn: () => api<TmdbConfig>('/admin/tmdb/config'), staleTime: 60_000 });
   const [draft, setDraft] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const save = useMutation({
     mutationFn: (body: TmdbPatch) => api<TmdbConfig>('/admin/tmdb/config', { method: 'PATCH', body }),
@@ -24,6 +25,7 @@ export function TmdbSettings() {
       client.setQueryData(tmdbKey, data);
       void client.invalidateQueries({ queryKey: ['metadata-status'] });
       setDraft('');
+      setDeleting(false);
       setMessage({ text: 'clear' in body ? '저장한 키를 지웠어요.' : '키를 저장했어요. 새로 여는 작품부터 정보가 붙어요.' });
     },
     onError: () => setMessage({ text: '키 형식을 확인해 주세요. TMDB의 API 읽기 액세스 토큰이나 API 키를 넣으면 돼요.', error: true })
@@ -53,9 +55,10 @@ export function TmdbSettings() {
             <Button type="submit" variant="primary" disabled={!value || save.isPending}>{save.isPending && !('clear' in (save.variables ?? {})) ? '저장 중…' : '저장'}</Button>
           </div>
           <small className="settings-hint">TMDB 계정의 <a className="text-btn" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">설정 → API</a>에서 무료로 받을 수 있어요. 저장한 키는 다시 보여 주지 않아요.</small>
-          {c.hasSavedCredential && <button type="button" className="text-btn tmdb-clear" disabled={save.isPending} onClick={() => { if (confirm('저장한 TMDB 키를 지울까요? 작품 정보를 더 가져오지 않아요.')) save.mutate({ clear: true }); }}>저장한 키 지우기</button>}
+          {c.hasSavedCredential && <button type="button" className="text-btn tmdb-clear" disabled={save.isPending} onClick={() => { setMessage(null); setDeleting(true); }}>저장한 키 지우기</button>}
         </form>}
       {message && <p className={message.error ? 'settings-error' : 'settings-hint'} role={message.error ? 'alert' : 'status'}>{message.text}</p>}
     </div>}
+    {deleting && <ConfirmDialog title="TMDB 키 삭제" confirmLabel="삭제" busy={save.isPending} onClose={() => setDeleting(false)} onConfirm={() => save.mutate({ clear: true })}>저장한 TMDB 키를 지울까요? 작품 정보를 더 가져오지 않아요.{message?.error && <p className="settings-error" role="alert">{message.text}</p>}</ConfirmDialog>}
   </div>;
 }

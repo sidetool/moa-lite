@@ -47,6 +47,12 @@ export interface ProgressSummary {
 
 export interface SeasonInfo { kind: "season" | "part" | "final" | "movie" | "ova" | "special"; season?: number; part?: number; label: string }
 
+export interface ResumeTarget {
+  episodeId: string;
+  position: number;
+  label: string;
+  kind: 'resume' | 'next';
+}
 export interface MediaCard {
   seasonInfo?: SeasonInfo;
   audio?: 'sub' | 'dub';
@@ -70,6 +76,8 @@ export interface MediaCard {
   /** Number of episodes for series/anime. */
   episodeCount?: number;
   progress?: ProgressSummary;
+  /** Next playable target; does not create viewing progress. */
+  resume?: ResumeTarget;
   inWatchlist?: boolean;
   /** Short label for a corner badge, e.g. "새 에피소드", "4K". */
   badge?: string;
@@ -181,11 +189,12 @@ export interface SearchGroup { provider: ProviderRef; items: MediaCard[]; error?
 // PUT    /api/watchlist/:mediaId       -> 204
 // DELETE /api/watchlist/:mediaId       -> 204
 // GET    /api/history?page=            -> Page<HistoryEntry>
+// DELETE /api/history/media/:mediaId -> 204 (current profile, whole title)
 // DELETE /api/history/:episodeId       -> 204
 // POST   /api/progress                 { episodeId, position, duration } -> EpisodeProgress
 //   Marks completed when position >= 90% of duration or < 120s remain.
 
-export interface HistoryEntry { media: MediaCard; episode: Episode; watchedAt: string }
+export interface HistoryEntry { media: MediaCard; episode: Episode; watchedAt: string; groupedCount?: number }
 
 /* ---------- Playback ---------- */
 
@@ -337,6 +346,8 @@ export interface NavigationTab {
 export interface Settings {
   /** Per-profile navigation. Omitted uses source-based defaults. */
   navigation?: NavigationTab[];
+  /** Show one history entry per title. Does not merge stored episode records. */
+  groupHistory: boolean;
   autoplayNext: boolean;
   /** Seconds before the next episode starts automatically. */
   autoplayDelay: number;

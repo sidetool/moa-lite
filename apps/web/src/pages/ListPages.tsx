@@ -1,16 +1,17 @@
+import type { HistoryEntry, Settings } from '@moa/shared';
 import { GroupedSearch } from '../components/GroupedFeed';
 import { hasLoginGate } from "../lib/api";
-import { Bookmark, ChevronRight, FolderOpen, History, LogOut, Search as SearchIcon, Settings, Users, UsersRound, X } from "lucide-react";
+import { Bookmark, ChevronRight, FolderOpen, History, LogOut, Search as SearchIcon, Settings as SettingsIcon, Trash2, Users, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSources } from "./SourcesPage";
-import { keys, useHistory, useMe, useProfiles, useSearch, useWatchlist } from "../api/queries";
+import { keys, useHistory, useMe, useProfiles, useSearch, useSettings, useWatchlist } from "../api/queries";
 import { PosterCard } from "../components/Cards";
 import { Avatar } from "../components/AppShell";
 import { logout } from "./AccountsPage";
 import { Artwork } from "../components/Artwork";
-import { Button, EmptyState, ProgressBar, Skeleton } from "../components/ui";
+import { Button, ConfirmDialog, EmptyState, ProgressBar, Skeleton, Toggle } from "../components/ui";
 import { api, currentProfileId, setCurrentProfileId } from "../lib/api";
 import { clock } from "../lib/format";
 import { settledQuery, useSettledQuery } from "../lib/search-input";
@@ -65,37 +66,72 @@ export function MyListPage() {
 
 export function HistoryPage() {
   const history = useHistory();
+  const settings = useSettings();
   const client = useQueryClient();
-  const remove = async (episodeId: string) => {
-    await api(`/history/${encodeURIComponent(episodeId)}`, { method: "DELETE" });
+  const [confirm, setConfirm] = useState<HistoryEntry | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  // A grouped entry stands for the whole title, so deleting it clears every episode's record.
+  const remove = async (entry: HistoryEntry) => {
+    setBusy(true); setError("");
+    try {
+      const grouped = entry.groupedCount !== undefined;
+      await api(grouped ? `/history/media/${encodeURIComponent(entry.media.id)}` : `/history/${encodeURIComponent(entry.episode.id)}`, { method: "DELETE" });
+      setConfirm(null);
+      void client.invalidateQueries({ queryKey: keys.history });
+      void client.invalidateQueries({ queryKey: ["home"] });
+    } catch {
+      setError("기록을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally { setBusy(false); }
+  };
+  const grouping = settings.data?.groupHistory ?? true;
+  // One save at a time: the switch stays disabled until the server answers, so toggles cannot race.
+  const setGrouping = async (groupHistory: boolean) => {
+    setSaving(true); setError("");
+    client.setQueryData<Settings>(keys.settings, old => (old ? { ...old, groupHistory } : old));
+    try { client.setQueryData(keys.settings, await api<Settings>("/settings", { method: "PATCH", body: { groupHistory } })); }
+    catch { setError("설정을 저장하지 못했어요."); await client.invalidateQueries({ queryKey: keys.settings }); }
+    finally { setSaving(false); }
     void client.invalidateQueries({ queryKey: keys.history });
-    void client.invalidateQueries({ queryKey: ["home"] });
   };
   const items = history.data?.items ?? [];
   return (
     <div className="page-pad">
-      <header className="page-head"><h1>시청 기록</h1></header>
+      <header className="page-head page-head-row">
+        <h1>시청 기록</h1>
+        {settings.data && <label className="history-grouping"><span>작품별로 보기</span><Toggle label="작품별로 보기" checked={grouping} disabled={saving} onChange={value => void setGrouping(value)} /></label>}
+      </header>
+      {error && !confirm && <p className="history-error" role="alert">{error}</p>}
       {history.isPending && <div className="history-list">{Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="history-sk" />)}</div>}
       {history.isSuccess && !items.length && <EmptyState icon={<History size={40} />} title="시청 기록이 없습니다" />}
       <ul className="history-list">
         {items.map(entry => {
           const p = entry.episode.progress;
+          const count = entry.groupedCount;
+          const episodes = count !== undefined && count > 1 ? `${count}개 회차` : null;
           return (
-            <li key={entry.episode.id} className="history-item">
-              <Link to={`/watch/${encodeURIComponent(entry.episode.id)}`} className="history-thumb">
+            <li key={count !== undefined ? `media:${entry.media.id}` : entry.episode.id} className="history-item">
+              <Link to={`/watch/${encodeURIComponent(entry.episode.id)}`} className="history-thumb" aria-label={`${entry.media.title} ${entry.media.type === "movie" ? "" : entry.episode.title} 재생`}>
                 <Artwork src={entry.episode.thumb ?? entry.media.backdrop} title={entry.media.title} ratio="landscape" width={320} labelFallback={false} />
                 {p && <ProgressBar ratio={p.completed ? 1 : p.position / Math.max(1, p.duration)} className="card-progress" />}
               </Link>
               <Link to={`/title/${encodeURIComponent(entry.media.id)}`} className="history-body">
                 <b>{entry.media.title}</b>
-                <span>{entry.media.type === "movie" ? "" : `${entry.episode.title} · `}{p?.completed ? "시청 완료" : p ? `${clock(p.position)} / ${clock(p.duration)}` : ""}</span>
-                <small>{new Date(entry.watchedAt).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
+                <span>{entry.media.type === "movie" ? "" : `${count !== undefined ? "최근 " : ""}${entry.episode.title} · `}{p?.completed ? "시청 완료" : p ? `${clock(p.position)} / ${clock(p.duration)}` : ""}</span>
+                <small>{[new Date(entry.watchedAt).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }), episodes].filter(Boolean).join(" · ")}</small>
               </Link>
-              <button className="icon-btn" aria-label="기록에서 삭제" title="기록에서 삭제" onClick={() => void remove(entry.episode.id)}><X size={18} /></button>
+              {count !== undefined
+                ? <button className="icon-btn" aria-label={`${entry.media.title} 작품 기록 모두 삭제`} title="작품 기록 모두 삭제" disabled={busy} onClick={() => { setError(""); if (count > 1) setConfirm(entry); else void remove(entry); }}><Trash2 size={18} /></button>
+                : <button className="icon-btn" aria-label="기록에서 삭제" title="기록에서 삭제" disabled={busy} onClick={() => void remove(entry)}><X size={18} /></button>}
             </li>
           );
         })}
       </ul>
+      {confirm && <ConfirmDialog title="작품 기록을 모두 삭제할까요?" confirmLabel="모두 삭제" busy={busy} onConfirm={() => void remove(confirm)} onClose={() => { setConfirm(null); setError(""); }}>
+        <p>‘{confirm.media.title}’의 {confirm.groupedCount}개 회차 기록과 이어볼 위치가 모두 지워져요.</p>
+        {error && <p className="history-error" role="alert">{error}</p>}
+      </ConfirmDialog>}
     </div>
   );
 }
@@ -119,7 +155,7 @@ export function MePage() {
         {admin && link("/sources", <FolderOpen size={20} />, "영상 소스")}
         {admin && link("/library", <FolderOpen size={20} />, "라이브러리 관리")}
         {admin && hasLoginGate && link("/accounts", <Users size={20} />, "계정과 초대")}
-        {link("/settings", <Settings size={20} />, "설정")}
+        {link("/settings", <SettingsIcon size={20} />, "설정")}
         {hasLoginGate && <button className="me-link" onClick={() => void logout()}><LogOut size={20} /><span>로그아웃{me.data && <small> · {me.data.username}</small>}</span><ChevronRight size={18} /></button>}
       </nav>
     </div>

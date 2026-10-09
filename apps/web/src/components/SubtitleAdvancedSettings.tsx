@@ -1,3 +1,4 @@
+import { Select } from './ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
@@ -134,11 +135,8 @@ function RequestControls() {
         <b>실패 시 다시 시도</b>
         <small>한 묶음의 요청이 실패했을 때 더 시도하는 횟수예요. 다음 키로 바꿔 보내는 것도 포함돼요. {c.retryCount ? `지금은 한 묶음에 최대 ${tries}번 요청해요.` : '지금은 실패하면 바로 멈춰요.'}</small>
       </div>
-      <select className="setting-select" aria-label="실패 시 다시 시도" value={c.retryCount} disabled={save.isPending} onChange={e => save.mutate({ retryCount: Number(e.target.value) })}>
-        {Array.from({ length: RETRY_COUNT.max - RETRY_COUNT.min + 1 }, (_, i) => RETRY_COUNT.min + i).map(n => (
-          <option key={n} value={n}>{n === 0 ? '안 함' : `${n}회${n === RETRY_COUNT.default ? ' (기본)' : ''}`}</option>
-        ))}
-      </select>
+      <Select className="setting-select" aria-label="실패 시 다시 시도" value={String(c.retryCount)} disabled={save.isPending} onChange={value => save.mutate({ retryCount: Number(value) })}
+        options={Array.from({ length: RETRY_COUNT.max - RETRY_COUNT.min + 1 }, (_, i) => RETRY_COUNT.min + i).map(n => ({ value: String(n), label: n === 0 ? '안 함' : `${n}회${n === RETRY_COUNT.default ? ' (기본)' : ''}` }))} />
     </div>
     {message && <p className={cx('settings-advanced-note', message.error ? 'settings-error' : 'settings-hint')} role={message.error ? 'alert' : 'status'}>{message.text}</p>}
   </>;

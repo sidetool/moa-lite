@@ -51,6 +51,7 @@ export class SubtitleClient {
     const http = new PublicHttpClient(
       positive(options.requestTimeoutMs, 4000, "requestTimeoutMs", 60_000),
       positive(options.maxResponseBytes, 20 * 1024 * 1024, "maxResponseBytes", 20 * 1024 * 1024),
+      undefined, options.maxRequests === undefined ? Infinity : positive(options.maxRequests, 64, "maxRequests", 256),
     );
     this.metadata = new MetadataClient(http, options.aliases, options.enableAniList ?? true, d => this.report(d));
     this.collector = new BlogCollector(http, {
@@ -182,6 +183,7 @@ export class SubtitleClient {
           catch (error) { this.error("download", error, scope.signal); }
         });
       }
+      if (!collected.length && !scope.signal.aborted) collected.push(...await this.collector.discover(resolved, query.episode, scope.signal));
       for (const candidate of collected) {
         const creator = creators.find(c => titleKey(c.name) === titleKey(candidate.creatorName));
         if (creator) candidate.creatorId = creator.id;

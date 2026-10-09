@@ -11,7 +11,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 120,
-      "includeFiles": "{vendor/byedpi/*,deploy/auth/*.{html,css,js,svg},node_modules/.pnpm/sql.js*/node_modules/sql.js/dist/sql-wasm.wasm,packages/subtitles-ko/dist/archive-worker.cjs,node_modules/.pnpm/libarchive-wasm*/node_modules/libarchive-wasm/dist/*}"
+      "includeFiles": "{vendor/byedpi/*,deploy/auth/*.{html,css,js,svg},node_modules/.pnpm/sql.js*/node_modules/sql.js/dist/sql-wasm.wasm,packages/subtitles-ko/dist/archive-*.cjs,node_modules/.pnpm/7z-wasm*/node_modules/7z-wasm/{7zz.umd.js,7zz.wasm,License.txt}}"
     }
   },
   "rewrites": [

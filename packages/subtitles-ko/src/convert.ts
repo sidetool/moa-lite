@@ -18,8 +18,8 @@ export function detectSubtitleEncoding(input: Uint8Array): SubtitleEncoding {
   catch { return "cp949"; } // CP949 is a superset of EUC-KR, which needs no separate fallback.
 }
 
-export function decodeSubtitleBuffer(input: Uint8Array): string {
-  return iconv.decode(Buffer.from(input), detectSubtitleEncoding(input)).replace(/^\uFEFF/, "");
+export function decodeSubtitleBuffer(input: Uint8Array, encoding?: string): string {
+  return iconv.decode(Buffer.from(input), encoding && iconv.encodingExists(encoding) ? encoding : detectSubtitleEncoding(input)).replace(/^\uFEFF/, "");
 }
 
 interface Cue { start: number; end: number; text: string }

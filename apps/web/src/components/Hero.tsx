@@ -5,11 +5,12 @@ import type { MediaCard } from "@moa/shared";
 import { Artwork, TitleLogo } from "./Artwork";
 import { Button, ProgressBar, Skeleton } from "./ui";
 import { TYPE_LABEL, certLabel, cx } from "../lib/format";
+import { resumeTarget } from "../lib/card-meta";
 
 const INTERVAL = 9000;
 
 export function playPath(card: MediaCard) {
-  return card.progress ? `/watch/${encodeURIComponent(card.progress.episodeId)}` : `/play/${encodeURIComponent(card.id)}`;
+  return resumeTarget(card)?.path ?? `/play/${encodeURIComponent(card.id)}`;
 }
 
 /** Rotating featured banner. Pauses while hovered, focused or hidden. */
@@ -35,6 +36,7 @@ export function Hero({ items }: { items: MediaCard[] }) {
 
   if (!count) return null;
   const card = items[index % count];
+  const resume = resumeTarget(card);
   const meta = [card.year, TYPE_LABEL[card.type], ...(card.genres ?? []).slice(0, 2)].filter(Boolean);
 
   return (
@@ -67,13 +69,13 @@ export function Hero({ items }: { items: MediaCard[] }) {
         <p className="hero-kicker">{card.provider.kind === "local" ? "내 라이브러리" : card.provider.name}</p>
         <TitleLogo className="hero-title" logo={card.logo} title={card.title} />
         <MetaLine card={card} meta={meta} />
-        {card.overview && !card.progress && <p className="hero-overview">{card.overview}</p>}
-        {card.progress && (
-          <div className="hero-progress"><ProgressBar ratio={card.progress.ratio} /><span>{card.progress.label}</span></div>
+        {card.overview && !resume && <p className="hero-overview">{card.overview}</p>}
+        {resume && (
+          <div className="hero-progress">{card.progress && <ProgressBar ratio={card.progress.ratio} />}<span>{resume.label}</span></div>
         )}
         <div className="hero-actions" data-remote-group>
           <Button variant="primary" size="l" data-remote-entry icon={<Play size={22} fill="currentColor" />} onClick={() => navigate(playPath(card))}>
-            {card.progress ? "이어보기" : "재생"}
+            {resume?.kind === "next" ? "다음 회차 보기" : resume ? "이어보기" : "재생"}
           </Button>
           <Button variant="secondary" size="l" icon={<Info size={22} />} onClick={() => navigate(`/title/${encodeURIComponent(card.id)}`)}>
             상세 정보

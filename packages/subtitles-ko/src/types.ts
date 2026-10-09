@@ -44,7 +44,7 @@ export interface SubtitleCreator {
   latestEpisode?: string;
   updatedAt?: string;
   isCurrentEpisode: boolean;
-  source: "anissia" | "archive" | "directory";
+  source: "anissia" | "archive" | "search" | "directory";
   animeNo?: number;
   title: string;
   season: number;
@@ -91,6 +91,8 @@ export interface SubtitleClientOptions {
   cache?: SubtitleCache;
   cacheTtlMs?: number;
   requestTimeoutMs?: number;
+  /** Bound outbound HTTP requests (including redirects) per client instance. */
+  maxRequests?: number;
   maxResponseBytes?: number;
   maxZipBytes?: number;
   maxZipEntries?: number;

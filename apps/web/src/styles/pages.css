@@ -779,3 +779,7 @@ p.remote-status-body { display: flex; align-items: center; gap: 10px; }
   .remote-mode:not(.is-selected) .remote-mode-body { display: none; }
   .remote-mode:not(.is-selected) .remote-mode-scope { margin-top: 4px; }
 }
+
+.history-grouping { display: inline-flex; align-items: center; gap: 10px; color: var(--text-2); font-size: .9rem; cursor: pointer; }
+.history-grouping:has(:disabled) { cursor: progress; opacity: .7; }
+.history-error { margin: 0 0 12px; color: var(--danger); font-size: .88rem; }

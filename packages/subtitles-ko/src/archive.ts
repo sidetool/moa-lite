@@ -20,11 +20,8 @@ export interface ExtractOptions {
 }
 export interface ExtractedSubtitle { filename: string; format: "ass" | "vtt"; content: string; matchedEpisode: number; exactEpisode: boolean }
 
-export function safeZipPath(name: string): boolean {
-  return !!name && !/[\x00-\x1f]/.test(name) && !/^(?:[\\/]|[A-Za-z]:)/.test(name) &&
-    !name.replace(/\\/g, "/").split("/").some(part => part === "..") &&
-    !name.startsWith("__MACOSX/");
-}
+export { safeZipPath } from "./archive-path.js";
+import { safeZipPath } from "./archive-path.js";
 
 function filenameFor(entry: Entry): string {
   const raw = entry.fileName as unknown as Buffer;
@@ -136,7 +133,7 @@ async function extractOtherArchive(buf: Buffer, options: ExtractOptions): Promis
   let worker: Worker | undefined;
   try {
     worker = new Worker(new URL('./archive-worker.cjs', import.meta.url), {
-      workerData: { input: buf, maxBytes, maxEntries: options.maxEntries ?? 300, decoderModule: createRequire(import.meta.url).resolve("libarchive-wasm") },
+      workerData: { input: buf, maxBytes, maxEntries: options.maxEntries ?? 300, decoderModule: createRequire(import.meta.url).resolve("7z-wasm") },
       resourceLimits: { maxOldGenerationSizeMb: 128, stackSizeMb: 4 },
       execArgv: [],
     });

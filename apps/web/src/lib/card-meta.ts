@@ -34,3 +34,15 @@ export function compareSeason(a: MediaCard, b: MediaCard) {
   if (season) return season;
   return (x?.part ?? 0) - (y?.part ?? 0) || Number(a.audio === "dub") - Number(b.audio === "dub") || (a.year ?? 9999) - (b.year ?? 9999) || a.title.localeCompare(b.title, "ko");
 }
+
+export interface ResumeAction { episodeId: string; label: string; kind: "resume" | "next"; path: string }
+/** Where a "continue" action should land: the unfinished episode, or the next one after a finished episode. */
+export function resumeTarget(card: MediaCard): ResumeAction | null {
+  const target = card.resume ?? (card.progress && { episodeId: card.progress.episodeId, label: card.progress.label, kind: "resume" as const, position: undefined });
+  if (!target) return null;
+  // The server's position is authoritative: 0 for an unseen next episode, the saved spot otherwise.
+  const path = `/watch/${encodeURIComponent(target.episodeId)}${target.position !== undefined ? `?t=${Math.floor(target.position)}` : ""}`;
+  // Unfinished viewing keeps the richer "S2:E3 · 12분 남음" summary.
+  const label = target.kind === "resume" && card.progress?.episodeId === target.episodeId ? card.progress.label : target.label;
+  return { episodeId: target.episodeId, label, kind: target.kind, path };
+}

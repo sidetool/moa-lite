@@ -6,7 +6,7 @@ import { decodeSubtitleBuffer } from "./convert.js";
 import { normalizeTitle, parseEpisodes, parseSeason, titleKey } from "./normalize.js";
 import { stableId } from "./metadata.js";
 import { failureCode } from "./async.js";
-import type { AliasEntry, Diagnostic, SubtitleCandidate, SubtitleCreator } from "./types.js";
+import type { AliasEntry, Diagnostic, ResolvedTitle, SubtitleCandidate, SubtitleCreator } from "./types.js";
 
 interface Link { url: string; label: string }
 interface PostLink { url: string; priority: number }
@@ -271,7 +271,7 @@ export class BlogCollector {
     const pageEpisodes = this.pageEpisodes(title, creator);
     // Once the article establishes the work, filenames only select the episode.
     // Creators routinely use arbitrary abbreviations or release names.
-    const confirmedArticle = confirmedPost || seriesPage;
+    const confirmedArticle = creator.source !== "search" && (confirmedPost || seriesPage);
     if (pageSeason !== undefined && pageSeason !== creator.season) return null;
     const attachments = extractAttachmentLinks(page.html, page.url);
     const expanded: Link[] = [];
@@ -420,6 +420,46 @@ export class BlogCollector {
     return new BlogCollector(http, this.options, this.report, this.index).collectBounded(creator, episode, signal, indexed, directOnly);
   }
 
+  async discover(resolved: ResolvedTitle, episode: number, signal: AbortSignal): Promise<SubtitleCandidate[]> {
+    const found: SubtitleCandidate[] = [], visited = new Set<string>();
+    const titles = [...new Set([resolved.baseTitle, ...(resolved.aliases ?? []).map(name => normalizeTitle(name).baseTitle)])].slice(0, 2);
+    for (const title of titles) {
+      if (signal.aborted || visited.size >= 4 || found.length) break;
+      const search = new URL('https://search.naver.com/search.naver');
+      search.searchParams.set('where', 'blog');
+      search.searchParams.set('query', `${title} ${resolved.season > 1 ? `${resolved.season}기 ` : ''}${resolved.episodeOffset ? '' : `${episode}화 `}자막`);
+      try {
+        const page = await this.page(search.href, signal), $ = load(page.html);
+        const results = $('a[href]').filter((_, node) => $(node).find('.sds-comps-text-type-headline1').length > 0);
+        if (!results.length) this.report({ stage: 'page', code: 'not-found', message: 'Naver blog search returned no readable article titles: no results, blocked, or changed response' });
+        const creators: SubtitleCreator[] = [];
+        for (const element of results.toArray()) {
+          const node = $(element), href = absolute(node.attr('href'), page.url);
+          if (!href) continue;
+          const url = new URL(naverPostUrl(href));
+          const naver = url.hostname === 'blog.naver.com' && url.pathname === '/PostView.naver' && url.searchParams.get('blogId') && /^\d+$/.test(url.searchParams.get('logNo') ?? '');
+          const tistory = url.hostname.endsWith('.tistory.com') && /^\/(?:\d+|entry\/[^/]+)\/?$/.test(url.pathname);
+          const blogger = url.hostname.endsWith('.blogspot.com') && /^\/\d{4}\/\d{2}\/[^/]+\.html$/.test(url.pathname);
+          if (!naver && !tistory && !blogger) continue;
+          url.hash = '';
+          const creator: SubtitleCreator = { id: stableId(url.origin, url.searchParams.get('blogId') ?? '', resolved.title), name: naver ? url.searchParams.get('blogId')! : url.hostname,
+            website: url.href, source: 'search', aliases: resolved.aliases, title: resolved.title, season: resolved.season, episodeOffset: resolved.episodeOffset, isCurrentEpisode: false, confidence: Math.min(resolved.confidence, .85) };
+          const label = node.find('.sds-comps-text-type-headline1').first().text();
+          if (!this.titleMatches(label, creator) || !this.episodeMatch(label, creator, episode) && !this.seriesPage(label, creator)) continue;
+          if (visited.has(url.href)) continue;
+          visited.add(url.href); creators.push(creator);
+          if (visited.size >= 4) break;
+        }
+        for (const creator of creators) {
+          if (signal.aborted) break;
+          const candidate = await this.collect(creator, episode, signal);
+          if (candidate) found.push(candidate);
+        }
+      } catch (error) { this.report({ stage: 'page', code: failureCode(error, signal), message: error instanceof Error ? error.message : 'Public subtitle search failed' }); }
+    }
+    return found;
+  }
+
   private async collectBounded(creator: SubtitleCreator, episode: number, signal: AbortSignal, indexed: boolean, directOnly: boolean): Promise<SubtitleCandidate | null> {
     if (!creator.website || signal.aborted) return null;
     const visited = new Set<string>();
@@ -429,6 +469,7 @@ export class BlogCollector {
       try { return await this.fromPage(await this.page(url, signal), creator, episode, signal); }
       catch (error) { this.failure("page", error, creator, signal); return null; }
     };
+    if (creator.source === 'search') return tryPage(creator.website);
     // Direct subtitle/archive URLs in Anissia are supported as well as blog posts.
     if (googleDriveDownloadUrl(creator.website) || filePattern.test(creator.website)) {
       try {
