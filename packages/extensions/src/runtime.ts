@@ -20,6 +20,8 @@ export interface MangayomiInvocation {
   timeoutMs?: number;
   /** Chosen by the MOA host, never by source code. */
   outboundProxy?: string;
+  /** Host-owned opt-in session HTTP; no credentials cross the guest boundary. */
+  http?: (request: CompatibilityHttpInput, signal: AbortSignal) => ReturnType<typeof compatibilityHttp>;
   webview?: (request: SourceWebViewRequest, signal: AbortSignal) => Promise<unknown>;
   signal: AbortSignal;
 }
@@ -118,7 +120,8 @@ export async function invokeMangayomi(input: MangayomiInvocation, transport = co
         const policy = compatibilityHttpPolicy(request?.options);
         let response: Awaited<ReturnType<typeof transport>>;
         try {
-          response = await transport(raw as CompatibilityHttpInput, signal, [], 4 * 1024 * 1024, input.outboundProxy);
+          if (request.options?.browserSession && !input.http) throw new Error('source_browser_unavailable');
+          response = input.http ? await input.http(request, signal) : await transport(request, signal, [], 4 * 1024 * 1024, input.outboundProxy);
           lastTransportFailure = response.statusCode >= 400 ? 'source_http_failed' : undefined;
         } catch (error) {
           if (

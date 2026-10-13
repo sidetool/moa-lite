@@ -49,9 +49,9 @@ export async function connectorHttp(input: any, signal?: AbortSignal) {
   finally { void connectorCall('end', { token }).catch(() => {}); }
 }
 const mediaSessions = new Set<string>();
-export async function prepareMedia(sessionId: string, url: string, headers: Record<string, string> = {}, mime?: string) {
+export async function prepareMedia(sessionId: string, url: string, headers: Record<string, string> = {}, mime?: string, inlinePlaylist?: string) {
   if (!await connectorAvailable()) return false;
-  await connectorCall('playback-begin', { sessionId, request: { url, headers }, mime }); mediaSessions.add(sessionId); return true;
+  await connectorCall('playback-begin', { sessionId, request: { url, headers }, mime, inlinePlaylist }); mediaSessions.add(sessionId); return true;
 }
 export function releaseMedia(sessionId: string) { if (mediaSessions.delete(sessionId)) void connectorCall('playback-end', { sessionId }).catch(() => {}); }
 export function releaseAllMedia() { for (const id of mediaSessions) releaseMedia(id); }

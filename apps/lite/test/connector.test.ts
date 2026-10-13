@@ -58,3 +58,12 @@ test('registration changes remove old matches, inject existing tabs and resync o
   startup(); await registration.ready(); assert.equal(registered.length, 3);
   installed({ reason: 'install' }); await registration.ready(); assert.equal(opened[0].url, 'extension://fixture/setup.html');
 });
+
+test('inline playlists retain late segment hosts within the shared 10000-segment limit', () => {
+  const body='#EXTM3U\n'+Array.from({length:2100},(_,i)=>`https://segments.example.org/${i}.ts`).join('\n')+'\nhttps://last.example.org/end.ts\n';
+  const urls=playlistUrls(body,'https://media.example.org/',10032);
+  assert.equal(urls.at(-1),'https://last.example.org/end.ts');
+  const rules=mediaRules({url:'https://media.example.org/list.m3u8',headers:{Authorization:'secret'}},'https://reader.example.org',1,10,urls);
+  assert.equal(rules.length,3);
+  assert(rules.slice(1).every(rule=>!rule.action.requestHeaders.some(item=>item.header==='authorization')));
+});

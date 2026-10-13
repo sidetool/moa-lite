@@ -22,43 +22,33 @@ export class Gemini {
       throw new ApiFailure(502, 'translation-unavailable');
     }
     if (!response.ok) {
-      let invalidKey = response.status === 401 || response.status === 403;
-      if (response.status === 400 && response.body) {
-        const reader = response.body.getReader(),
-          chunks: Uint8Array[] = [];
+      let code = response.status === 401 ? 'translation-key-invalid'
+        : response.status === 402 ? 'translation-credit-exhausted'
+        : response.status === 403 ? 'translation-permission-denied'
+        : response.status === 404 ? 'translation-model-unavailable'
+        : response.status === 429 ? 'translation-quota'
+        : response.status === 400 ? 'translation-request-rejected' : 'translation-unavailable';
+      if ([400, 401, 403, 404, 429].includes(response.status) && response.body) {
+        const reader = response.body.getReader(), chunks: Uint8Array[] = [];
         let bytes = 0;
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             bytes += value.length;
-            if (bytes > 65536) {
-              await reader.cancel();
-              break;
-            }
+            if (bytes > 65536) { await reader.cancel(); break; }
             chunks.push(value);
           }
           const error = JSON.parse(Buffer.concat(chunks).toString('utf8')).error;
-          invalidKey =
-            error?.details?.some((detail: any) =>
-              ['API_KEY_INVALID', 'API_KEY_EXPIRED', 'API_KEY_SERVICE_BLOCKED'].includes(detail.reason),
-            ) === true;
-        } catch {
-          /* Provider messages are never returned or logged. */
-        }
+          const reasons = Array.isArray(error?.details) ? error.details.map((detail: any) => detail?.reason) : [];
+          if (reasons.some((reason: string) => ['API_KEY_INVALID', 'API_KEY_EXPIRED'].includes(reason))) code = 'translation-key-invalid';
+          else if (reasons.includes('API_KEY_SERVICE_BLOCKED')) code = 'translation-permission-denied';
+          else if (error?.code === 'insufficient_quota') code = 'translation-credit-exhausted';
+          else if (error?.code === 'model_not_found') code = 'translation-model-unavailable';
+        } catch {}
       } else await response.body?.cancel();
-      throw new ApiFailure(
-        502,
-        response.status === 429
-          ? 'translation-quota'
-          : invalidKey
-            ? 'translation-key-invalid'
-            : response.status === 404
-              ? 'translation-model-unavailable'
-              : response.status === 400
-                ? 'translation-request-rejected'
-                : 'translation-unavailable',
-      );
+      if (signal.aborted) throw new ApiFailure(409, 'translation-cancelled');
+      throw new ApiFailure(502, code);
     }
     const reader = response.body?.getReader();
     if (!reader) throw new ApiFailure(502, 'translation-invalid-response');
@@ -77,6 +67,7 @@ export class Gemini {
       }
       return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
+      if (signal.aborted) throw new ApiFailure(409, 'translation-cancelled');
       throw new ApiFailure(502, 'translation-invalid-response');
     }
   }
@@ -137,6 +128,7 @@ export class Gemini {
           .join(''),
       );
     } catch {
+      if (signal.aborted) throw new ApiFailure(409, 'translation-cancelled');
       throw new ApiFailure(502, 'translation-invalid-response');
     }
     const result: Record<string, string> = {},

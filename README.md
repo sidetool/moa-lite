@@ -83,6 +83,7 @@ Vercel Hobby와 Upstash Free의 한도 안에서 무료입니다. **무료로 �
 - [구현 구조와 저장 범위](docs/ARCHITECTURE.md)
 - [검증 결과와 남은 확인 사항](docs/VERIFICATION.md)
 - [면책 조항](DISCLAIMER.md) · [보안 제보](SECURITY.md) · [기여](CONTRIBUTING.md)
+- [원본 동기화 범위](docs/UPSTREAM_SYNC.md) — 확장 호환성, 반영한 개선과 라이트 전용 제약
 - [MOA 원본 README](docs/upstream/MOA-README.md) — `docs/`의 다른 문서는 MOA 원본 문서이며 Docker판 기준입니다.
 
 ## 개발

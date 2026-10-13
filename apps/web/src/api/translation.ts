@@ -95,6 +95,8 @@ export function translationErrorMessage(code?: string): string {
     "translation-not-configured": "관리자가 번역 설정을 마치지 않았어요.",
     "translation-disabled": "관리자가 자막 번역을 꺼 두었어요.",
     "translation-queue-full": "번역 대기열이 가득 찼어요. 잠시 후 다시 시도해 주세요.",
+    "translation-permission-denied": "번역 서비스 접근 권한이 없어요. 관리자가 키 권한을 확인해 주세요.",
+    "translation-credit-exhausted": "번역 서비스 잔액이나 할당량이 소진됐어요.",
     "translation-key-invalid": "Gemini API 키가 올바르지 않아요. 관리자에게 알려 주세요.",
     "translation-model-invalid": "설정된 번역 모델을 쓸 수 없어요. 관리자에게 알려 주세요.",
     "translation-model-unavailable": "번역 모델을 지금 사용할 수 없어요. 잠시 후 다시 시도해 주세요.",

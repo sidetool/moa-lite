@@ -7,3 +7,5 @@ export function createHash(algorithm: string) {
   return { update(value: string | Uint8Array) { hash.update(typeof value === 'string' ? new TextEncoder().encode(value) : value); return this; },
     digest(encoding?: string) { const bytes = Buffer.from(hash.digest()); return encoding === 'hex' ? bytes.toString('hex') : bytes; } };
 }
+
+export const randomBytes = (size: number) => Buffer.from(crypto.getRandomValues(new Uint8Array(size)));

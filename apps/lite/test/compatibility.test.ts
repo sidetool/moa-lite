@@ -55,3 +55,11 @@ test('upstream inline ASS/VTT/SRT and opaque HLS classification are shared by Li
   assert.equal(inlineSubtitle('[Script Info]\nScriptType: v4.00+\n[Events]\n').format,'ass');
   assert.throws(()=>inlineSubtitle('<html>denied</html>'));
 });
+
+test('unsupported browser-session requests are rejected before either Lite transport sends HTTP', async () => {
+  const request = {url:'https://fixture.example.org/',options:{browserSession:{url:'https://fixture.example.org/',readOnly:true}}};
+  assert.throws(()=>requestSpec(request),/source_browser_unavailable/);
+  let calls=0;
+  await assert.rejects(sourceHttp(request,AbortSignal.timeout(1000),async()=>{calls++;throw new Error('must not send');}),/source_browser_unavailable/);
+  assert.equal(calls,0);
+});

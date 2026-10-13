@@ -1,3 +1,4 @@
+import { isInlineHls } from '../../server/src/inline-hls.js';
 import { ApiFailure } from '../domain.js';
 
 type Video = { url: string; quality?: string };
@@ -12,6 +13,7 @@ function https(value: string): string | undefined {
  * mpv percent quoting counts UTF-8 bytes. Timing lengths, multiple segments,
  * track declarations and unknown directives must never be discarded. */
 export function directVideoUrl(value: string): string | undefined {
+  if (isInlineHls(value)) return value;
   if (!value.startsWith('edl://')) return https(value);
   const data = new TextEncoder().encode(value.slice(6));
   if (!data.length || data.length > 2 * 1024 * 1024) return;

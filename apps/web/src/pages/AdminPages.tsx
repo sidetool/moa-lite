@@ -1,21 +1,21 @@
+import { SubtitleStyleControls } from '../components/SubtitleStyleControls';
 import { remotePreference, setRemotePreference, type RemotePreference } from "../lib/remote";
 import { NavigationSettings } from "../components/NavigationSettings";
-import { devicePrefs, setDevicePref, type DevicePrefs } from "../lib/device-prefs";
-import { Globe, Info, ChevronRight, Puzzle, Folder, FolderOpen, FolderPlus, RefreshCw, Trash2, Tv, X } from "lucide-react";
+import { useDevicePrefs, setDevicePref, type DevicePrefs } from "../lib/device-prefs";
+import { Play, Subtitles, LayoutGrid, UserRound, Gamepad2, FlaskConical, Users, Languages, ChevronLeft, Info, ChevronRight, Puzzle, Folder, FolderOpen, FolderPlus, RefreshCw, Trash2, Tv, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LibraryFolder, MediaType, ScanStatus, Settings } from "@moa/shared";
-import { NetworkSettings } from "../components/NetworkSettings";
 import { connectorSummary, useConnectorStatus } from "./ConnectorPage";
 import { TmdbSettings } from "../components/TmdbSettings";
 import { TranslationSettings } from "../components/TranslationSettings";
-import { SubtitleAdvancedSettings } from "../components/SubtitleAdvancedSettings";
+import { SubtitleAdvancedSettings, RequestControls } from "../components/SubtitleAdvancedSettings";
 import { translationModeOf, useTranslationConfig, type TranslationMode } from "../api/translation";
-import { keys, useFolders, useMe, useScanStatus, useSettings } from "../api/queries";
+import { keys, useFolders, useMe, useScanStatus, useSettings, useSaveSettings } from "../api/queries";
 import { AccountSection } from "./AccountsPage";
 import { Button, Select, EmptyState, IconButton, Skeleton, Spinner } from "../components/ui";
-import { api, currentProfileId, hasLoginGate } from "../lib/api";
+import { api, hasLoginGate } from "../lib/api";
 import { TYPE_LABEL, cx } from "../lib/format";
 
 function FolderPicker({ onPick, onClose }: { onPick: (path: string, type: MediaType, label: string) => void; onClose: () => void }) {
@@ -152,33 +152,40 @@ function TranslationModeRow({ mode, available, korean, onChange }: { mode: Trans
 
 export function SettingsPage() {
   const [remote, setRemote] = useState(remotePreference);
-  const [device, setDevice] = useState(devicePrefs);
-  const setPref = <K extends keyof DevicePrefs>(key: K, value: DevicePrefs[K]) => { setDevicePref(key, value); setDevice(old => ({ ...old, [key]: value })); };
+  const device = useDevicePrefs();
+  const setPref = setDevicePref;
   const settings = useSettings();
+  const client = useQueryClient();
   const admin = useMe().data?.role === "admin";
   const translation = useTranslationConfig().data;
-  const client = useQueryClient();
-  const { pathname } = useLocation();
-  useEffect(() => {
-    if (pathname !== "/settings/tabs" || !settings.data) return;
-    document.getElementById("tabs")?.scrollIntoView({ block: "start" });
-  }, [pathname, Boolean(settings.data)]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pendingSaves = useRef<Promise<void>>(Promise.resolve());
-  const saveVersion = useRef(0);
-  const save = (patch: Partial<Settings>) => {
-    const version = ++saveVersion.current, profile = currentProfileId();
-    client.setQueryData<Settings>(keys.settings, old => (old ? { ...old, ...patch } : old));
-    // Keep rapid mode changes in order; an older response must not re-enable automatic translation.
-    const request = pendingSaves.current.catch(() => {}).then(async () => {
-      if (currentProfileId() !== profile) return;
-      const saved = await api<Settings>("/settings", { method: "PATCH", body: patch });
-      if (version === saveVersion.current && currentProfileId() === profile) client.setQueryData(keys.settings, saved);
-    });
-    pendingSaves.current = request;
-    return request.catch(() => {
-      if (version === saveVersion.current && currentProfileId() === profile) void client.invalidateQueries({ queryKey: keys.settings });
-    });
-  };
+  const { pathname, hash } = useLocation();
+  // Grouped by where a choice applies: the profile, this device only, or the whole server.
+  const categories: Array<{ value: string; label: string; group: string; icon: React.ReactNode; scope: string }> = [
+    { value: "playback", label: "재생", group: "프로필", icon: <Play size={18} />, scope: "‘이 기기에서만’ 항목은 이 브라우저에만, 나머지는 이 프로필의 모든 기기에 적용돼요." },
+    { value: "subtitles", label: "자막", group: "프로필", icon: <Subtitles size={18} />, scope: "선택한 자막은 이 기기에 기억돼요. 자막 모양은 이 기기와 프로필에, 싱크는 영상과 기기마다 따로 저장돼요." },
+    { value: "tabs", label: "홈 화면", group: "프로필", icon: <LayoutGrid size={18} />, scope: "이 프로필의 모든 기기에 적용돼요." },
+    ...(hasLoginGate ? [{ value: "account", label: "내 계정", group: "프로필", icon: <UserRound size={18} />, scope: "로그인한 계정에 적용돼요." }] : []),
+    { value: "controls", label: "조작", group: "이 기기", icon: <Gamepad2 size={18} />, scope: "리모컨·키보드·터치로 다루는 방식이에요. 이 브라우저에만 저장돼요." },
+    { value: "experimental", label: "실험 기능", group: "이 기기", icon: <FlaskConical size={18} />, scope: "동작이 바뀌거나 없어질 수 있어요." },
+    ...(admin ? [
+      { value: "sources", label: "영상 소스", group: "서버 관리", icon: <Tv size={18} />, scope: "" },
+      { value: "library", label: "작품 정보", group: "서버 관리", icon: <FolderOpen size={18} />, scope: "" },
+      ...(hasLoginGate ? [{ value: "accounts", label: "계정과 초대", group: "서버 관리", icon: <Users size={18} />, scope: "" }] : []),
+      { value: "translation", label: "번역 서비스", group: "서버 관리", icon: <Languages size={18} />, scope: "모든 프로필의 AI 자막 번역에 쓰여요." },
+    ] : []),
+    { value: "about", label: "정보", group: "", icon: <Info size={18} />, scope: "버전, 업데이트와 크레딧" }
+  ];
+  // Older addresses keep working after categories were merged.
+  const aliases: Record<string, string> = { "subtitle-advanced": "subtitles", updates: "about", device: "controls" };
+  const requested = pathname === "/settings/tabs" ? "tabs" : aliases[hash.slice(1)] ?? hash.slice(1);
+  // Narrow screens open on the category list; wide screens always show a category beside it.
+  const chosen = categories.find(item => item.value === requested);
+  const current = chosen ?? categories[0];
+  const category = current.value;
+  useEffect(() => { window.scrollTo(0, 0); }, [category]);
+  const categoryPath = (value: string) => `/settings#${value}`;
+  const saveSettings = useSaveSettings();
+  const save = (patch: Partial<Settings>) => saveSettings(patch).catch(() => {});
   const s = settings.data;
   if (!s) return <div className="page-pad narrow"><header className="page-head"><h1>설정</h1></header>{settings.isError ? <EmptyState title="설정을 불러오지 못했습니다" action={<Button onClick={() => void settings.refetch()}>다시 시도</Button>} /> : <><Skeleton className="settings-sk" /><Skeleton className="settings-sk" /></>}</div>;
   const row = (title: string, desc: string, control: React.ReactNode) => (
@@ -187,60 +194,71 @@ export function SettingsPage() {
   const select = <K extends keyof Settings>(key: K, options: Array<[Settings[K], string]>) => (
     <Select className="setting-select" aria-label={String(key)} value={String(s[key])} onChange={value => void save({ [key]: (typeof s[key] === "number" ? Number(value) : value) } as Partial<Settings>)} options={options.map(([value, label]) => ({ value: String(value), label }))} />
   );
-  const link = (to: string, icon: React.ReactNode, title: string, desc: string) => (
-    <Link to={to} className="setting setting-link"><span className="setting-icon">{icon}</span><div><b>{title}</b><small>{desc}</small></div><ChevronRight size={18} /></Link>
-  );
   return (
-    <div className="page-pad narrow settings-page">
+    <div className={cx("page-pad narrow settings-page", chosen ? "is-detail" : "is-index")}>
       <header className="page-head"><h1>설정</h1></header>
-      {hasLoginGate && <AccountSection />}
-      <section className="settings-group">
-        <h2>재생</h2>
+      <div className="settings-layout">
+      <nav className="settings-nav" aria-label="설정 메뉴">
+        {[...new Set(categories.map(item => item.group))].map(group => <div className="settings-nav-section" key={group || "etc"}>
+          {group && <span className="settings-nav-group">{group}</span>}
+          <div className="settings-nav-list">{categories.filter(item => item.group === group).map(item => (
+            <Link key={item.value} to={categoryPath(item.value)} replace={Boolean(chosen)} aria-current={chosen && category === item.value ? "page" : undefined} data-current={category === item.value || undefined}>
+              <span className="settings-nav-icon">{item.icon}</span><span>{item.label}</span><ChevronRight size={18} className="settings-nav-chevron" />
+            </Link>
+          ))}</div>
+        </div>)}
+      </nav>
+      <div className="settings-panel" key={category}>
+      <header className="settings-panel-head">
+        <Link className="settings-back" to="/settings" replace><ChevronLeft size={20} />설정</Link>
+        <h2>{current.label}</h2>
+        {current.scope && <p>{current.scope}</p>}
+      </header>
+      {category === "account" && hasLoginGate && <AccountSection />}
+      {category === "playback" && <section className="settings-group">
+        <h2>모든 기기</h2>
         <div className="settings-card">
           {row("다음 화 자동 재생", "에피소드가 끝나면 다음 화를 이어서 재생합니다.", <Toggle label="다음 화 자동 재생" checked={s.autoplayNext} onChange={value => void save({ autoplayNext: value })} />)}
           {s.autoplayNext && row("자동 재생 대기 시간", "다음 화 카드가 나온 뒤 재생까지 기다리는 시간", select("autoplayDelay", [[3, "3초"], [5, "5초"], [10, "10초"], [15, "15초"]]))}
+          {row("시청 기록 작품별로 보기", "시청 기록에서 작품마다 가장 최근 회차만 보여줘요. 끄면 회차별로 모두 보여줘요.", <Toggle label="시청 기록 작품별로 보기" checked={s.groupHistory} onChange={value => void save({ groupHistory: value }).then(() => client.invalidateQueries({ queryKey: keys.history }))} />)}
           {row("기본 화질", "네트워크가 느리면 낮은 화질이 끊김이 적어요.", select("preferredQuality", [["auto", "자동"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"]]))}
-          {import.meta.env.VITE_MOA_LITE !== "1" && row("하드웨어 변환", "브라우저가 재생할 수 없는 영상을 서버 GPU로 변환합니다.", <Toggle label="하드웨어 변환" checked={s.hardwareTranscoding} onChange={value => void save({ hardwareTranscoding: value })} />)}
         </div>
-      </section>
-      <section className="settings-group">
-        <h2>자막</h2>
+      </section>}
+      {category === "playback" && <section className="settings-group"><h2>이 기기에서만</h2><div className="settings-card">
+        {row("재생 시 전체 화면", "작품을 누르면 바로 전체 화면으로 재생합니다. 끄면 재생 화면에서 직접 전환해요.", <Toggle label="재생 시 전체 화면" checked={device.fullscreenOnPlay} onChange={value => setPref("fullscreenOnPlay", value)} />)}
+        {row("오프닝·엔딩 자동 건너뛰기", "구간 정보가 있는 회차에서 오프닝과 엔딩을 알아서 넘깁니다. 되감으면 다시 볼 수 있어요.", <Toggle label="오프닝·엔딩 자동 건너뛰기" checked={device.autoSkip} onChange={value => setPref("autoSkip", value)} />)}
+        {row("화면 채우기", "영상을 화면 비율에 맞춰 꽉 채웁니다. 가장자리가 조금 잘릴 수 있어요.", <Toggle label="화면 채우기" checked={device.videoFill} onChange={value => setPref("videoFill", value)} />)}
+      </div></section>}
+      {category === "controls" && <section className="settings-group"><div className="settings-card"><ConnectorLink />
+        {row("TV 리모컨 모드", "방향키로 이동하고 확인 버튼으로 선택합니다. 자동 모드는 TV 감지 또는 탐색 화면의 방향키 입력으로 켜집니다.", <Select className="setting-select" aria-label="TV 리모컨 모드" value={remote} onChange={value => { setRemote(value as RemotePreference); setRemotePreference(value as RemotePreference); }} options={[{ value: "auto", label: "자동" }, { value: "on", label: "항상 켜기" }, { value: "off", label: "끄기" }]} />)}
+        {row("빠른 탐색 간격", "두 번 탭, 앞으로·뒤로 버튼과 J·L 키로 이동하는 시간", <Select className="setting-select" aria-label="빠른 탐색 간격" value={String(device.seekStep)} onChange={value => setPref("seekStep", Number(value) as DevicePrefs["seekStep"])} options={[5, 10, 15, 30].map(value => ({ value: String(value), label: `${value}초` }))} />)}
+      </div></section>}
+      {category === "subtitles" && <section className="settings-group">
+        <h2>언어와 자동 찾기</h2>
         <div className="settings-card">
           {row("기본 자막 언어", "여러 자막이 있으면 이 언어를 먼저 고릅니다.", select("defaultSubtitleLang", [["ko", "한국어"], ["en", "영어"], ["ja", "일본어"], ["off", "끄기"]]))}
           {row("한국어 자막 자동 찾기", "애니에 한국어 자막이 없으면 애니시아·자막 블로그에서 찾아 적용합니다.", <Toggle label="한국어 자막 자동 찾기" checked={s.autoFetchSubtitles} onChange={value => void save({ autoFetchSubtitles: value })} />)}
           {translation && <TranslationModeRow mode={translationModeOf(s)} available={translation.configured && translation.enabled} korean={s.defaultSubtitleLang === "ko"} onChange={translationMode => void save({ translationMode })} />}
-          {row("자막 크기", "재생 중 자막 설정에서 기기별로 바꿀 수도 있어요.", select("subtitleSize", [["small", "작게"], ["medium", "보통"], ["large", "크게"], ["xlarge", "더 크게"]]))}
-          <SubtitleAdvancedSettings settings={s} admin={admin} save={patch => void save(patch)} />
+          <SubtitleAdvancedSettings settings={s} admin={false} save={patch => void save(patch)} />
         </div>
-      </section>
-      <section className="settings-group"><h2>이 기기</h2><div className="settings-card">
-        {import.meta.env.VITE_MOA_LITE === "1" && <ConnectorLink />}
-        {row("재생 시 전체 화면", "작품을 누르면 바로 전체 화면으로 재생합니다. 끄면 재생 화면에서 직접 전환해요.", <Toggle label="재생 시 전체 화면" checked={device.fullscreenOnPlay} onChange={value => setPref("fullscreenOnPlay", value)} />)}
-        {row("오프닝·엔딩 자동 건너뛰기", "구간 정보가 있는 회차에서 오프닝과 엔딩을 알아서 넘깁니다. 되감으면 다시 볼 수 있어요.", <Toggle label="오프닝·엔딩 자동 건너뛰기" checked={device.autoSkip} onChange={value => setPref("autoSkip", value)} />)}
-        {row("빠른 탐색 간격", "두 번 탭, 앞으로·뒤로 버튼과 J·L 키로 이동하는 시간", <Select className="setting-select" aria-label="빠른 탐색 간격" value={String(device.seekStep)} onChange={value => setPref("seekStep", Number(value) as DevicePrefs["seekStep"])} options={[5, 10, 15, 30].map(value => ({ value: String(value), label: `${value}초` }))} />)}
-        {row("작품별 자막 싱크 기억", "자막 싱크를 조절하면 같은 작품의 다음 회차에도 그대로 적용합니다.", <Toggle label="작품별 자막 싱크 기억" checked={device.rememberSubOffset} onChange={value => setPref("rememberSubOffset", value)} />)}
-        {row("화면 채우기", "영상을 화면 비율에 맞춰 꽉 채웁니다. 가장자리가 조금 잘릴 수 있어요.", <Toggle label="화면 채우기" checked={device.videoFill} onChange={value => setPref("videoFill", value)} />)}
-        {row("TV 리모컨 모드", "방향키로 이동하고 확인 버튼으로 선택합니다. 자동 모드는 TV 감지 또는 탐색 화면의 방향키 입력으로 켜집니다.", <Select className="setting-select" aria-label="TV 리모컨 모드" value={remote} onChange={value => { setRemote(value as RemotePreference); setRemotePreference(value as RemotePreference); }} options={[{ value: "auto", label: "자동" }, { value: "on", label: "항상 켜기" }, { value: "off", label: "끄기" }]} />)}
-      </div></section>
-      <section className="settings-group"><h2>실험 기능</h2><div className="settings-card">
+      </section>}
+      {category === "subtitles" && <section className="settings-group">
+        <h2>자막 모양 · 이 기기</h2>
+        <div className="settings-card"><SubtitleStyleControls settings={s} save={patch => void save(patch)} /></div>
+        <p className="settings-hint">싱크는 재생 화면의 자막 설정에서 조절해요.</p>
+      </section>}
+      {category === "experimental" && <section className="settings-group"><h2>이 기기에서만</h2><div className="settings-card">
         {row("다른 소스 시즌 모아보기", "작품 상세의 시즌 메뉴에 다른 소스에 있는 정규 시즌까지 모아 순서대로 보여줘요. 시즌을 찾는 동안 목록이 늦게 채워질 수 있어요.", <Toggle label="다른 소스 시즌 모아보기" checked={device.seasonSwitcher} onChange={value => setPref("seasonSwitcher", value)} />)}
         {row("작품 묶기", "여러 소스의 같은 작품을 카드 하나로 합쳐 보여줘요. 끄면 소스별 결과를 그대로 보여줘요.", <Toggle label="작품 묶기" checked={device.titleGrouping} onChange={value => setPref("titleGrouping", value)} />)}
-      </div></section>
-      <section className="settings-group"><h2>정보</h2><div className="settings-card">{link("/about", <Info size={20} />, "정보/크레딧", "작품 정보 제공 및 오픈소스 라이선스")}</div></section>
-      <NavigationSettings />
-      {admin && <><section className="settings-group">
-        <h2>소스와 라이브러리</h2>
-        <div className="settings-card">
-          {link("/sources", <Tv size={20} />, "영상 소스", "확장 저장소, 소스 설치·업데이트·설정")}
-          {import.meta.env.VITE_MOA_LITE !== "1" && link("/library", <FolderOpen size={20} />, "로컬 라이브러리", "영상 폴더 추가와 스캔")}
-          <TmdbSettings />
-          {import.meta.env.VITE_MOA_LITE !== "1" && link("/remote-access", <Globe size={20} />, "원격 접속", "집 밖에서도 MOA 열기 · 주소와 QR")}
-        </div>
-        <p className="settings-hint">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
-      </section>
-      <TranslationSettings />
-      {import.meta.env.VITE_MOA_LITE === "1" && <section className="settings-group"><h2>운영</h2><div className="settings-card">{link("/settings/diagnostics", <Info size={20} />, "진단 · 할당량", "무료 한도, 서버 요청·오류와 CPU 참고 측정")}</div></section>}
-      {import.meta.env.VITE_MOA_LITE !== "1" && <NetworkSettings />}</>}
+      </div></section>}
+      {category === "about" && <section className="settings-group"><div className="settings-card"><Link to="/about" className="setting setting-link">정보/크레딧<ChevronRight size={18} /></Link>{admin && <Link to="/settings/diagnostics" className="setting setting-link">진단 · 할당량<ChevronRight size={18} /></Link>}</div></section>}
+      {category === "tabs" && <NavigationSettings />}
+      {admin && category === "sources" && <section className="settings-group"><div className="settings-card"><Link to="/sources" className="setting setting-link">영상 소스 관리<ChevronRight size={18} /></Link><ConnectorLink /></div></section>}
+      {admin && category === "accounts" && <Link to="/accounts" className="setting setting-link">계정과 초대<ChevronRight size={18} /></Link>}
+      {admin && category === "library" && <><section className="settings-group"><h2>작품 정보</h2><div className="settings-card"><TmdbSettings /></div><p className="settings-hint">This product uses the TMDB API but is not endorsed or certified by TMDB.</p></section></>}
+      {admin && category === "translation" && <><TranslationSettings /><section className="settings-group"><h2>요청 설정</h2><div className="settings-card"><RequestControls /></div></section></>}
+      </div>
+      </div>
     </div>
   );
 }

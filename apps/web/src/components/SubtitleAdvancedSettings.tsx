@@ -89,7 +89,7 @@ export function SubtitleAdvancedSettings({ settings: s, admin, save }: { setting
 }
 
 /** Admin only: server-wide pacing between Gemini requests and retries per batch. */
-function RequestControls() {
+export function RequestControls() {
   const client = useQueryClient();
   const config = useTranslationConfig();
   const [intervalDraft, setIntervalDraft] = useState<string | null>(null);

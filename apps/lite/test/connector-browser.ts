@@ -48,6 +48,13 @@ browser=await chromium.launchPersistentContext(await mkdtemp(dir+'/profile-'),{e
   const redirected=await request('/redirect');assert.equal(redirected.error,undefined,JSON.stringify(redirected));assert.equal(redirected.value.statusCode,200);assert.equal(redirected.value.headers['x-token'],'upstream-token');assert.match(redirected.value.headers['set-cookie'],/fixture=1/);
   const stopped=await request('/redirect',{options:{followRedirects:false}});assert.equal(stopped.value.statusCode,302);assert.equal(stopped.value.headers.location,'/end');assert.equal(stopped.value.isRedirect,true);
   for(const method of ['PUT','PATCH','DELETE']){const response=await request('/end',{method,body:'한글',headers:{'X-Custom':'custom','User-Agent':'fixture-agent',Referer:'https://fixture.example.org/'}});assert.equal(response.value?.statusCode,200,JSON.stringify(response));assert.equal(seen.at(-1).headers['user-agent'],'fixture-agent');assert.equal(seen.at(-1).body,'한글');}
+  const beforeInline=seen.length;
+  const inline=await call('playback-begin',{sessionId:'inline-fixture',request:{url:'https://fixture.example.org/end',headers:{Referer:'https://fixture.example.org/'}},mime:'application/vnd.apple.mpegurl',inlinePlaylist:'#EXTM3U\n#EXTINF:5,\nhttps://fixture.example.org/end\n#EXT-X-ENDLIST\n'});
+  assert.equal(inline.error,undefined,JSON.stringify(inline));assert.equal(seen.length,beforeInline,'inline manifest requires no connector download');
+  const rules=await worker.evaluate(async()=>(globalThis as any).chrome.declarativeNetRequest.getSessionRules());
+  assert(rules.some((r:any)=>r.priority===2));
+  await call('playback-end',{sessionId:'inline-fixture'});
+  assert(!(await worker.evaluate(async()=>(globalThis as any).chrome.declarativeNetRequest.getSessionRules())).some((r:any)=>r.priority===2));
   const denied=await request('/denied');assert.equal(denied.error,'host_permission_missing');
   assert(seen.every(row => !row.headers.cookie));
   const authTab = await browser.newPage(); await authTab.goto('https://fixture.example.org/end');

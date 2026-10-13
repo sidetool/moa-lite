@@ -33,6 +33,7 @@ export function requestSpec(input, image = false) {
     else if (name !== 'accept-encoding') headers[name] = value;
   }
   const policy = compatibilityHttpPolicy(input.options);
+  if (input.options?.browserSession) throw new Error('source_browser_unavailable');
   return { url: url.href, origin: url.origin, method, headers, special, body: input.body,
     ...policy, maximum: image ? limits.image : limits.http, image };
 }

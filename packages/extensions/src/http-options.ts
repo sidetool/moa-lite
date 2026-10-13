@@ -1,4 +1,6 @@
 export interface CompatibilityHttpOptions {
+  /** Explicit opt-in; POST must be a source-defined read operation. */
+  browserSession?: { url: string; readOnly?: boolean };
   timeout?: number;
   followRedirects?: boolean;
   maxRedirects?: number;
@@ -8,8 +10,9 @@ export interface CompatibilityHttpOptions {
 export function compatibilityHttpPolicy(options?: CompatibilityHttpOptions) {
   if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options)))
     throw new Error('invalid_source_invocation');
-  const { timeout, followRedirects, maxRedirects } = options ?? {};
+  const { timeout, followRedirects, maxRedirects, browserSession } = options ?? {};
   if (
+    (browserSession !== undefined && (!browserSession || typeof browserSession !== 'object' || Array.isArray(browserSession) || typeof browserSession.url !== 'string' || browserSession.url.length > 8192 || (browserSession.readOnly !== undefined && typeof browserSession.readOnly !== 'boolean'))) ||
     (timeout !== undefined && (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0)) ||
     (followRedirects !== undefined && typeof followRedirects !== 'boolean') ||
     (maxRedirects !== undefined && (!Number.isSafeInteger(maxRedirects) || maxRedirects < 0))

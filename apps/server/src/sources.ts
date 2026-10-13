@@ -1,3 +1,5 @@
+import { SourceIdentities } from './source-identity.js';
+import { isInlineHls } from './inline-hls.js';
 import { SourceQueue, type SourceLane } from './source-queue.js';
 import { CacheStats } from './cache-stats.js';
 import { DetailPolicy } from './detail-policy.js';
@@ -28,6 +30,9 @@ export class Sources {
   private reads: SourceReadCache;
   readonly stats = new CacheStats();
   private details: DetailPolicy;
+  private identities: SourceIdentities;
+  private navigationRevision = new Map<string,number>();
+  private failedNavigation = new Map<string,{source:string;until:number}>();
   constructor(public db: Store, public catalog: Catalog, private runtime = invokeMangayomi, private fetchCode = fetchExtension, private fetchRegistry = fetchRepository, public apk = new ApkBridge()) {
     db.db.exec(`CREATE TABLE IF NOT EXISTS server_network(id INTEGER PRIMARY KEY CHECK(id=1),proxy TEXT NOT NULL,revision INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS source_entries(id TEXT PRIMARY KEY,repository TEXT NOT NULL,entry TEXT NOT NULL,installed_entry TEXT,code TEXT,sha256 TEXT,preferences TEXT NOT NULL DEFAULT '{}',enabled INTEGER NOT NULL DEFAULT 0,type TEXT NOT NULL DEFAULT 'series',live INTEGER NOT NULL DEFAULT 0);
@@ -46,6 +51,7 @@ export class Sources {
     if(!db.all('PRAGMA table_info(source_repositories)').some(r=>r.name==='kind')) db.db.exec("ALTER TABLE source_repositories ADD COLUMN kind TEXT NOT NULL DEFAULT 'mangayomi-js'");
     this.reads = new SourceReadCache(db,this.abort.signal,Date.now,undefined,this.stats);
     this.details = new DetailPolicy(db);
+    this.identities = new SourceIdentities(db);
   }
   network() {
     const row = this.db.get('SELECT * FROM server_network WHERE id=1');
@@ -161,6 +167,7 @@ export class Sources {
         // Durable cleanup intent survives an unavailable worker and can be retried by removal.
         for (const p of packages) this.db.run('INSERT OR REPLACE INTO source_apk_removals VALUES(?,?,?)',p.id,p.repository,p.pkg);
         for (const id of unique) {
+          this.identities.clear(id);
           for (const e of this.db.all('SELECT e.id FROM episodes e JOIN source_media s ON s.media_id=e.media_id WHERE s.source_id=?', id)) episodes.add(e.id);
           for (const image of this.db.all('SELECT image_id FROM source_image_owners WHERE source_id=?', id)) images.add(image.image_id);
           this.db.run('DELETE FROM source_image_owners WHERE source_id=?', id);
@@ -220,6 +227,8 @@ export class Sources {
       await this.runtime({entry,source:fetched.source,preferences:JSON.parse(row.preferences),action:'filters',outboundProxy:this.proxy(),signal:this.abort.signal});
       this.db.transaction(() => {
         if(row.code && (row.sha256 !== fetched.sha256 || JSON.parse(row.installed_entry).version !== entry.version)) this.db.run('INSERT OR REPLACE INTO source_backups VALUES(?,?,?,?,?)',id,row.installed_entry,row.code,row.sha256 || '',row.preferences);
+        this.identities.sync(id,JSON.parse(row.installed_entry || row.entry).baseUrl);
+        this.identities.sync(id,entry.baseUrl);
         this.db.run('UPDATE source_entries SET code=?,sha256=?,installed_entry=?,enabled=1 WHERE id=?', fetched.source, fetched.sha256, row.entry, id);
       });
       this.invalidate(id); return this.list().find(s => s.id === id)!;
@@ -231,6 +240,8 @@ export class Sources {
       const backup=this.db.get('SELECT * FROM source_backups WHERE source_id=?',id);
       if(!backup) throw new ApiFailure(409,'source-no-backup');
       this.db.transaction(()=>{
+        this.identities.sync(id,JSON.parse(this.row(id,false).installed_entry).baseUrl);
+        this.identities.sync(id,JSON.parse(backup.entry).baseUrl,true);
         this.db.run('UPDATE source_entries SET code=?,sha256=?,installed_entry=?,preferences=? WHERE id=?',backup.code,backup.sha256,backup.entry,backup.preferences,id);
         this.db.run('DELETE FROM source_backups WHERE source_id=?',id);
         this.db.run('DELETE FROM source_health WHERE source_id=?',id);
@@ -250,7 +261,9 @@ export class Sources {
     const code = /apk_(reprepare_required|cache_integrity|not_installed)|apk-installation-missing/.test(raw) ? 'preparation-required' : /timeout|timed.?out/i.test(raw) ? 'timeout' : /cloudflare|403|captcha/i.test(raw) ? 'access-denied' : /proxy|connect|fetch|network/i.test(raw) ? 'connection-failed' : /unsupported|not implemented/i.test(raw) ? 'unsupported' : 'source-error';
     this.db.run('INSERT OR REPLACE INTO source_health VALUES(?,?,?,?,?)',id,Number(ok),now(),action,ok ? null : code);
   }
-  invalidate(id: string) { this.reads.invalidate(id); this.details.invalidateSource(id); this.db.run('UPDATE source_media SET detail_at=0 WHERE source_id=?', id); }
+  invalidate(id: string) {
+    this.navigationRevision.set(id,(this.navigationRevision.get(id)||0)+1);
+    for(const [key,value] of this.failedNavigation)if(value.source===id)this.failedNavigation.delete(key); this.reads.invalidate(id); this.details.invalidateSource(id); this.db.run('UPDATE source_media SET detail_at=0 WHERE source_id=?', id); }
   configure(id: string, values: { enabled?: boolean; type?: MediaType; live?: boolean }) {
     const r = this.row(id, false);
     if (!r.code) throw new ApiFailure(409, 'source-not-installed');
@@ -323,13 +336,15 @@ export class Sources {
     if (result.statusCode !== 200) throw new ApiFailure(502,'image-unavailable');
     return result.bytes;
   }
-  private putItem(sourceId: string, item: SourceItem) {
+  private putItem(sourceId: string, item: SourceItem, knownId?: string) {
     const r = this.row(sourceId), entry: MangayomiEntry = JSON.parse(r.installed_entry);
     if (!item || !text(item.name) || !text(item.link, 16_384)) return null;
     // These extension navigation cards contain instructions rather than playable media.
     if (/(?:^|\/)__[^/]*(?:card|divider|guide)__\//.test(item.link)) return null;
     if (item.link.startsWith('{')) { try { if (JSON.parse(item.link).weekdayCard) return null; } catch {} }
-    const id = 'remote-' + key(sourceId, item.link), old = this.db.get('SELECT title,type,metadata FROM media WHERE id=?', id);
+    const exactId = 'remote-' + key(sourceId, item.link);
+    const id = knownId ?? this.identities.findWork(sourceId,item.link,entry.baseUrl) ?? exactId;
+    const old = this.db.get('SELECT title,type,metadata FROM media WHERE id=?', id);
     const meta = { ...JSON.parse(old?.metadata || '{}'), ...('adult' in item && typeof item.adult === 'boolean' ? { adult: item.adult } : {}), provider: { id: sourceId, name: entry.name, lang: entry.lang, kind: (entry as unknown as ApkEntry).format === 'aniyomi-apk' ? 'aniyomi-apk' : 'mangayomi-js' }, live: Boolean(r.live), ...(item.imageUrl ? { poster: this.image(sourceId, webUrl(item.imageUrl, entry.baseUrl), { Referer: entry.baseUrl, ...(item.imageHeaders || {}) }) } : {}), ...(item.description ? { overview: text(item.description, 20_000) } : {}), ...(Array.isArray(item.genre) ? { genres: item.genre.filter(g => typeof g === 'string').slice(0, 50) } : {}) };
     let title = item.name.slice(0,500);
     const shortened = /(?:\.{3}|…)\s*$/.test(title);
@@ -340,8 +355,41 @@ export class Sources {
     const inferred = /^(anime|animation)$/.test(category || '') ? 'anime' : /^movies?$/.test(category || '') ? 'movie' : /^(dramas?|tv|series)$/.test(category || '') ? 'series' : undefined;
     const type = ['anime','movie','series'].includes(item.type || '') ? item.type : inferred || old?.type || r.type;
     this.db.run(`INSERT INTO media VALUES(?,NULL,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,type=excluded.type,metadata=excluded.metadata`, id, title, type, JSON.stringify(meta), now());
-    this.db.run('INSERT OR IGNORE INTO source_media(media_id,source_id,url) VALUES(?,?,?)', id, sourceId, item.link);
+    this.identities.work(sourceId,id,item.link,entry.baseUrl);
+    const previous=this.db.get('SELECT url FROM source_media WHERE media_id=?',id)?.url;
+    const url=previous && this.identities.navigationUrl(sourceId,item.link,entry.baseUrl)===previous?previous:item.link;
+    this.db.run('INSERT INTO source_media(media_id,source_id,url) VALUES(?,?,?) ON CONFLICT(media_id) DO UPDATE SET url=excluded.url', id, sourceId, url);
     return id;
+  }
+  private async navigationCall(id: string, action: 'detail'|'videos', url: string, params: Record<string,unknown> = {}) {
+    const row=this.row(id), entry=JSON.parse(row.installed_entry || row.entry);
+    const revision=this.navigationRevision.get(id)||0;
+    const current=()=>{
+      this.abort.signal.throwIfAborted();
+      if(this.removing.has(id) || (this.navigationRevision.get(id)||0)!==revision)throw new ApiFailure(409,'source-changed');
+      const latest=this.row(id);
+      if(latest.installed_entry!==row.installed_entry || latest.sha256!==row.sha256)throw new ApiFailure(409,'source-changed');
+    };
+    const resolved=this.identities.navigationUrl(id,url,entry.baseUrl);
+    const field=action==='detail'?'workUrl':'episodeUrl', failureKey=key(id,action,url,resolved);
+    const invoke=async(value:string)=>{
+      current();
+      const result=await (action==='detail'?this.readCall(id,action,{...params,[field]:value}):this.call(id,action,{...params,[field]:value}));
+      try { current(); } catch(error) { if(action==='videos')void this.apk.release((result as ExtractedVideos)?.apkLease);throw error; }
+      return result;
+    };
+    if(resolved!==url && (this.failedNavigation.get(failureKey)?.until||0)<=Date.now()) {
+      try {
+        const result=await invoke(resolved);
+        const valid=action==='detail'?Array.isArray((result as SourceItem)?.chapters):Array.isArray(result) && result.some(v=>v && typeof v.url==='string' && (v.url.startsWith('edl://') || webUrl(v.url,'') || isInlineHls(v.url)));
+        if(valid)return {result,url:resolved,current};
+        if(action==='videos')void this.apk.release((result as ExtractedVideos)?.apkLease);
+      } catch(error) { current(); }
+      // Bound both retry count and repeated failures without storing raw signed URLs.
+      if(this.failedNavigation.size>=1024)this.failedNavigation.delete(this.failedNavigation.keys().next().value!);
+      this.failedNavigation.set(failureKey,{source:id,until:Date.now()+5*60_000});
+    }
+    return {result:await invoke(url),url,current};
   }
   private async readCall(id:string,action:string,params:Record<string,unknown>={}) {
     const started=Date.now();
@@ -422,8 +470,11 @@ export class Sources {
     if(mapping.detail_at>0)this.reads.prime(mapping.source_id,cacheKey,true,mapping.detail_at);
     return this.reads.read(mapping.source_id,cacheKey,this.details.policy(id),current=>this.serial(mapping.source_id, async () => {
       current();const row = this.row(mapping.source_id);
+      const entry = JSON.parse(row.installed_entry || row.entry);
       const title=this.db.get('SELECT title FROM media WHERE id=?',id)?.title||'';
-      const raw = await this.readCall(mapping.source_id, 'detail', { workUrl: mapping.url,title }) as SourceItem;
+      const currentUrl=this.db.get('SELECT url FROM source_media WHERE media_id=?',id)!.url;
+      const navigation=await this.navigationCall(mapping.source_id,'detail',currentUrl,{title});
+      const raw = navigation.result as SourceItem;
       current();this.row(mapping.source_id);
       if (!raw || !Array.isArray(raw.chapters)) throw new ApiFailure(502, 'source-invalid-response');
       let chapters = raw.chapters.slice(0, 10_000).filter(e => text(e.url, 16_384));
@@ -436,16 +487,23 @@ export class Sources {
       const parsed = chapters.map((e, i) => { const n = /(?:^|\s|제)(\d+(?:\.\d+)?)\s*(?:화|회|편|話|화\b)|(?:episode|ep\.?|e)\s*(\d+)/i.exec(e.name); return { e, n: typeof (e as any).number === 'number' && (e as any).number >= 0 ? (e as any).number : n ? Number(n[1] || n[2]) : chapters.length - i }; });
       const media = this.db.get('SELECT * FROM media WHERE id=?', id)!;
       this.db.transaction(() => {
-        this.putItem(mapping.source_id, { ...raw, name: raw.name || media.title, link: mapping.url });
+        this.putItem(mapping.source_id, { ...raw, name: raw.name || media.title, link: navigation.url }, id);
+        this.identities.detailAlias(mapping.source_id,id,navigation.url,raw.link,entry.baseUrl);
         if (!row.live && chapters.length === 1 && /영화|movie|film|본편/i.test(mapping.url + ' ' + (raw.genre || []).join(' ') + ' ' + chapters[0].name)) this.db.run("UPDATE media SET type='movie' WHERE id=?", id);
+        const observed = new Map<string,number>();
         for (const { e, n } of parsed) {
-          const eid = 'remote-' + key(id, e.url);
+          const exactId = 'remote-' + key(id, e.url);
+          const eid = this.identities.findEpisode(id,e.url,entry.baseUrl) || exactId;
           this.db.run(`INSERT INTO episodes VALUES(?,?,?,?,?,0,NULL) ON CONFLICT(id) DO UPDATE SET season=excluded.season,number=excluded.number,title=excluded.title`, eid, id, parseSeason(raw.name || media.title) ?? 1, n, text(e.name) || `${n}화`);
-          this.db.run('INSERT OR REPLACE INTO source_episodes VALUES(?,?)', eid, e.url);
+          this.identities.episode(id,eid,e.url,entry.baseUrl);
+          const previous=this.db.get('SELECT url FROM source_episodes WHERE episode_id=?',eid)?.url;
+          const url=previous && this.identities.navigationUrl(mapping.source_id,e.url,entry.baseUrl)===previous?previous:e.url;
+          this.db.run('INSERT OR REPLACE INTO source_episodes VALUES(?,?)', eid, url);
+          observed.set(eid,n);
         }
         // Mangayomi JSON completed=1; Aniyomi SAnime completed=2.
         const apk = JSON.parse(row.installed_entry || row.entry).format === 'aniyomi-apk';
-        this.details.observe(id, parsed.map(({e,n})=>({id:'remote-'+key(id,e.url),number:n})), raw.status === (apk ? 2 : 1));
+        this.details.observe(id, [...observed].map(([episodeId,number])=>({id:episodeId,number})), raw.status === (apk ? 2 : 1));
         this.db.run('UPDATE source_media SET detail_at=? WHERE media_id=?', Date.now(), id);
       });
       return true;
@@ -453,11 +511,25 @@ export class Sources {
   }
   remoteEpisode(episodeId: string) { return this.db.get('SELECT s.source_id,s.media_id,e.url FROM source_episodes e JOIN episodes ep ON ep.id=e.episode_id JOIN source_media s ON s.media_id=ep.media_id WHERE e.episode_id=?', episodeId); }
   async videos(episodeId: string) {
-    const mapping = this.remoteEpisode(episodeId); if (!mapping) throw new ApiFailure(404, 'episode-not-found');
-    return this.serial(mapping.source_id, async () => {
-      const videos = await this.call(mapping.source_id, 'videos', { episodeUrl: mapping.url }) as ExtractedVideos;
+    const source = this.remoteEpisode(episodeId); if (!source) throw new ApiFailure(404, 'episode-not-found');
+    return this.serial(source.source_id, async () => {
+      const mapping=this.remoteEpisode(episodeId); if(!mapping)throw new ApiFailure(404,'episode-not-found');
+      const navigation=await this.navigationCall(mapping.source_id,'videos',mapping.url);
+      const videos = navigation.result as ExtractedVideos;
+      try { navigation.current(); } catch(error) { void this.apk.release(videos?.apkLease);throw error; }
       if (!Array.isArray(videos)) throw new ApiFailure(502, 'source-invalid-response');
-      const filtered: ExtractedVideos = videos.filter(v => v && typeof v.url === 'string' && (v.url.startsWith('edl://') || webUrl(v.url, ''))).slice(0, 32);
+      const filtered: ExtractedVideos = videos.filter(v => v && typeof v.url === 'string' && (v.url.startsWith('edl://') || webUrl(v.url, '') || isInlineHls(v.url))).slice(0, 32);
+      if (videos.length && !filtered.length) {
+        // No playback session will own this lease when all returned formats are rejected.
+        if (videos.apkLease) void this.apk.release(videos.apkLease);
+        throw new ApiFailure(502, 'unsupported-stream-format');
+      }
+      if(filtered.length && navigation.url!==mapping.url)this.db.transaction(()=>{
+        const entry=JSON.parse(this.row(mapping.source_id).installed_entry);
+        this.identities.episode(mapping.media_id,episodeId,mapping.url,entry.baseUrl,false);
+        this.identities.episode(mapping.media_id,episodeId,navigation.url,entry.baseUrl,false);
+        this.db.run('UPDATE source_episodes SET url=? WHERE episode_id=? AND url=?',navigation.url,episodeId,mapping.url);
+      });
       filtered.apkLease = videos.apkLease; return filtered;
     }, 'interactive');
   }

@@ -144,7 +144,10 @@ api.runtime.onConnect.addListener(port => {
         await permission(spec.origin);
         for (const key of ['referer', 'origin']) if (spec.special[key]) await permission(new URL(spec.special[key]).origin);
         // Read small playlists only. Media and segments are fetched by the playback tab itself.
-        if (message.mime === 'application/vnd.apple.mpegurl' || /\.m3u8(?:\?|$)/i.test(spec.url)) {
+        if (message.inlinePlaylist !== undefined) {
+          if (typeof message.inlinePlaylist !== 'string' || new TextEncoder().encode(message.inlinePlaylist).length > 512 * 1024 || !message.inlinePlaylist.startsWith('#EXTM3U')) throw new Error('invalid_source_invocation');
+          urls.push(...playlistUrls(message.inlinePlaylist, spec.url, 10032));
+        } else if (message.mime === 'application/vnd.apple.mpegurl' || /\.m3u8(?:\?|$)/i.test(spec.url)) {
           const first = await transport(spec, id, state);
           const text = new TextDecoder().decode(Uint8Array.from(atob(first.bytes), ch => ch.charCodeAt(0)));
           urls.push(...playlistUrls(text, first.finalUrl ?? spec.url));

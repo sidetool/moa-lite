@@ -1,7 +1,8 @@
-import { useTitleGrouping } from "../lib/device-prefs";
+import { useMemo } from 'react';
+import { deviceSettingsPatch, loadDevicePrefs, saveDevicePrefs, useDevicePrefs, useTitleGrouping } from "../lib/device-prefs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Account, HomeResponse, LibraryFolder, MediaCard, MediaDetail, MediaType, Page, Profile, ScanStatus, SearchGroup, Settings, HistoryEntry } from "@moa/shared";
-import { api } from "../lib/api";
+import { api, currentProfileId } from "../lib/api";
 
 export const keys = {
   me: ["me"] as const,
@@ -24,7 +25,7 @@ export const useProfiles = () => useQuery({ queryKey: keys.profiles, queryFn: ()
 
 export const useHome = (type?: MediaType, providers?: string[], continueScope: "tab" | "all" = "tab") => {
   const titleGrouping = useTitleGrouping();
-  return useQuery({ queryKey: [...keys.home(type), providers, continueScope, titleGrouping], queryFn: ({ signal }) => api<HomeResponse>(`/home?${new URLSearchParams({ continueScope, titleGrouping: String(titleGrouping), ...(type ? { type } : {}), ...(providers ? { providers: providers.join(",") } : {}) })}`, { signal }) });
+  return useQuery({ queryKey: [...keys.home(type), providers, continueScope, titleGrouping], queryFn: ({ signal }) => api<HomeResponse>(`/home?${new URLSearchParams({ continueScope, watchlistScope: continueScope, titleGrouping: String(titleGrouping), ...(type ? { type } : {}), ...(providers ? { providers: providers.join(",") } : {}) })}`, { signal }) });
 };
 
 export const useMedia = (id: string) =>
@@ -50,7 +51,47 @@ export const useHistory = () => useQuery({ queryKey: keys.history, queryFn: () =
 export const useFolders = () => useQuery({ queryKey: keys.folders, queryFn: () => api<LibraryFolder[]>("/library/folders") });
 export const useScanStatus = (poll: boolean) =>
   useQuery({ queryKey: keys.scan, queryFn: () => api<ScanStatus>("/library/status"), refetchInterval: poll ? 1500 : false });
-export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: () => api<Settings>("/settings") });
+export const useSettings = () => {
+  const device = useDevicePrefs();
+  const result = useQuery({ queryKey: keys.settings, queryFn: async ({ signal }) => {
+    const profile = currentProfileId();
+    const settings = await api<Settings>('/settings', { signal });
+    if (settings && currentProfileId() === profile) await loadDevicePrefs(settings, signal);
+    return settings;
+  } });
+  const deviceKey = JSON.stringify(deviceSettingsPatch(device));
+  const data = useMemo(() => result.data ? { ...result.data, ...JSON.parse(deviceKey) } as Settings : result.data, [result.data, deviceKey]);
+  return { ...result, data };
+};
+
+const settingsSaves = new Map<string | null, Promise<void>>();
+export function useSaveSettings() {
+  const client = useQueryClient(), profile = currentProfileId();
+  const accountId = () => { try { return localStorage.getItem('moa-lite.account'); } catch { return null; } };
+  const account = accountId();
+  const current = () => currentProfileId() === profile && accountId() === account;
+  return (patch: Partial<Settings>) => {
+    // An input may commit during unmount after the viewer has changed profile.
+    if (!current()) return Promise.resolve();
+    const device = deviceSettingsPatch(patch);
+    const deviceSave = Object.keys(device).length ? saveDevicePrefs(device) : Promise.resolve();
+    patch = Object.fromEntries(Object.entries(patch).filter(([key]) => !(key in device)));
+    if (!Object.keys(patch).length) return deviceSave;
+    client.setQueryData<Settings>(keys.settings, old => old ? { ...old, ...patch } : old);
+    const save = (settingsSaves.get(profile) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      if (!current()) return;
+      const saved = await api<Settings>('/settings', { method: 'PATCH', body: patch, keepalive: true });
+      if (settingsSaves.get(profile) === save && current()) client.setQueryData(keys.settings, saved);
+    });
+    settingsSaves.set(profile, save);
+    void save.finally(() => {
+      if (settingsSaves.get(profile) !== save) return;
+      settingsSaves.delete(profile);
+      if (currentProfileId() === profile) void client.invalidateQueries({ queryKey: keys.settings });
+    }).catch(() => {});
+    return Promise.all([save, deviceSave]).then(() => {});
+  };
+}
 
 /** Optimistic watchlist toggle; card and detail caches update immediately. */
 export function useWatchlistToggle() {

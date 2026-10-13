@@ -1,4 +1,4 @@
-import type { Episode, EpisodeProgress, MediaCard, MediaDetail, HomeResponse, HistoryEntry, MediaType, Page, ProviderRef, Row } from '@moa/shared';
+import type { Episode, EpisodeProgress, MediaCard, MediaDetail, MetadataCandidate, HomeResponse, HistoryEntry, MediaType, Page, ProviderRef, Row } from '@moa/shared';
 import { KidsPolicy } from './kids.js';
 import { Store } from './db.js';
 import { ApiFailure, normalize } from './util.js';
@@ -62,18 +62,23 @@ export class Catalog {
   watchlist(profile: string): MediaCard[] {
     return this.kids.filter(this.db.all('SELECT m.* FROM media m JOIN watchlist w ON w.media_id=m.id WHERE w.profile_id=? ORDER BY w.added_at DESC', profile), profile).map(m => this.card(m, profile));
   }
-  home(profile: string, type?: MediaType, providers?: string[], continueScope: 'tab' | 'all' = 'tab'): HomeResponse {
+  home(profile: string, type?: MediaType, providers?: string[], continueScope: 'tab' | 'all' = 'tab', watchlistScope: 'tab' | 'all' = 'tab', groupContinue?: (recent: MediaCard[], candidates: Record<string, any>[]) => MediaCard[]): HomeResponse {
     const allowed = (c: MediaCard) => providers ? providers.includes(c.provider.id) : c.provider.kind !== "local";
-    const allCards = this.cards(profile, type);
-    const cards = allCards.filter(allowed), watchlist = this.watchlist(profile).filter(c => (!type || c.type === type) && allowed(c));
+    const allRows = this.kids.filter(this.db.all(`SELECT * FROM media ${type ? 'WHERE type=?' : ''} ORDER BY added_at DESC,id`, ...(type ? [type] : [])), profile);
+    const selectedRows = allRows.filter(row => { const provider = JSON.parse(row.metadata).provider || LOCAL_PROVIDER; return providers ? providers.includes(provider.id) : provider.kind !== 'local'; });
+    const hydrated = new Map<string, MediaCard>();
+    const card = (row: Record<string, any>) => { let value = hydrated.get(row.id); if (!value) { value = this.card(row, profile); hydrated.set(row.id, value); } return value; };
+    // A saved title is personal state, independent of which sources populate the main Home tab.
+    const watchlist = this.watchlist(profile).filter(c => (!type || c.type === type) && (watchlistScope === 'all' || allowed(c)));
     // Home resume history belongs to the profile, independently of tab discovery sources.
-    const resumeCards = new Map((continueScope === 'all' ? allCards : cards).map(c => [c.id, c]));
-    const ongoing = this.db.all(`SELECT e.media_id,MAX(p.updated_at) AS updated FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? AND (p.position>0 OR p.completed=1) GROUP BY e.media_id ORDER BY updated DESC`, profile)
+    const resumeRows = new Map((continueScope === 'all' ? allRows : selectedRows).map(row => [row.id, row]));
+    const recent = this.db.all(`SELECT e.media_id,MAX(p.updated_at) AS updated FROM progress p JOIN episodes e ON e.id=p.episode_id WHERE p.profile_id=? AND (p.position>0 OR p.completed=1) GROUP BY e.media_id ORDER BY updated DESC,e.media_id`, profile)
       .flatMap(p => {
-        const card = resumeCards.get(p.media_id);
-        return card?.resume ? [card] : [];
+        const row = resumeRows.get(p.media_id);
+        return row ? [card(row)] : [];
       });
-    const local = cards.filter(c => c.provider.kind === "local");
+    const ongoing = groupContinue ? groupContinue(recent, [...resumeRows.values()]) : recent.filter(card => card.resume);
+    const local = selectedRows.filter(row => { const provider = JSON.parse(row.metadata).provider; return !provider || provider.kind === 'local'; }).map(card);
     const rows: Row[] = [
       { id: 'continue', title: '이어보기', kind: 'continue', layout: 'landscape', items: ongoing.slice(0, 30), more: { path: '/history' } },
       { id: 'watchlist', title: '볼 목록', kind: 'watchlist', layout: 'poster', items: watchlist.slice(0, 30), more: { path: '/my-list' } },
@@ -83,7 +88,8 @@ export class Catalog {
       if (!type || type === t) rows.push({ id: t, title, kind: 'media', layout: 'poster', items: local.filter(c => c.type === t).slice(0, 30), more: { path: `/local?type=${t}` } });
     }
     for (const genre of [...new Set(local.flatMap(c => c.genres || []))].sort()) rows.push({ id: `genre:${genre}`, title: genre, kind: 'genre', layout: 'poster', items: local.filter(c => c.genres?.includes(genre)).slice(0, 30), more: { path: `/local/genre/${encodeURIComponent(genre)}` } });
-    return { hero: cards.filter(c => c.backdrop).slice(0, 5), rows: rows.filter(row => row.items.length > 0) };
+    const backdrops = new Set(this.db.all("SELECT l.media_id FROM tmdb_links l JOIN tmdb_titles t ON t.kind=l.kind AND t.tmdb_id=l.tmdb_id WHERE l.status IN ('auto','manual') AND json_extract(t.card,'$.backdrop') IS NOT NULL").map(row => row.media_id));
+    return { hero: selectedRows.filter(row => JSON.parse(row.metadata).backdrop || backdrops.has(row.id)).slice(0, 5).map(card), rows: rows.filter(row => row.items.length > 0) };
   }
   page<T>(items: T[], page: number, size = 40): Page<T> { return { items: items.slice((page - 1) * size, page * size), page, hasNextPage: items.length > page * size, total: items.length }; }
   history(profile: string, page: number): Page<HistoryEntry> {
@@ -99,11 +105,23 @@ export class Catalog {
     const paged = this.page(filtered, page);
     return { ...paged, items: paged.items.map(p => ({ media: this.card(this.db.get('SELECT * FROM media WHERE id=?', p.media_id)!, profile), episode: this.episodes(p.media_id, profile).find(e => e.id === p.episode_id)!, watchedAt: p.updated_at, ...(grouped ? { groupedCount: counts.get(p.media_id)! } : {}) })) };
   }
-  search(profile: string, query: string) {
+  search(profile: string, query: string, metadata: MetadataCandidate[] = []) {
     const q = normalize(query);
-    const ids = new Set(this.db.all('SELECT id,title FROM media').filter(m => normalize(m.title).includes(q)).map(m => m.id));
-    for (const t of this.db.all('SELECT media_id,title FROM media_titles')) if (normalize(t.title).includes(q)) ids.add(t.media_id);
-    const found = this.cards(profile).filter(c => ids.has(c.id) || normalize(c.title).includes(q) || normalize(c.originalTitle || '').includes(q));
+    const matches = (...names: unknown[]) => names.some(name => typeof name === 'string' && normalize(name).includes(q));
+    const rows = this.db.all('SELECT * FROM media ORDER BY added_at DESC,id');
+    const ids = new Set(rows.filter(m => {
+      const info = JSON.parse(m.metadata);
+      return matches(m.title, info.originalTitle, ...(Array.isArray(info.altTitles) ? info.altTitles : []));
+    }).map(m => m.id));
+    for (const t of this.db.all('SELECT media_id,title,original_title FROM media_titles')) if (matches(t.title, t.original_title)) ids.add(t.media_id);
+    const linked = this.db.all("SELECT l.media_id,l.kind,l.tmdb_id,t.card FROM tmdb_links l LEFT JOIN tmdb_titles t ON t.kind=l.kind AND t.tmdb_id=l.tmdb_id WHERE l.status IN ('auto','manual')");
+    const identities = new Set(metadata.map(item => `${item.kind}:${item.id}`));
+    for (const row of linked) {
+      const info = JSON.parse(row.card || '{}');
+      if (ids.has(row.media_id) || matches(info.title, info.originalTitle, ...(Array.isArray(info.aliases) ? info.aliases : []))) identities.add(`${row.kind}:${row.tmdb_id}`);
+    }
+    for (const row of linked) if (identities.has(`${row.kind}:${row.tmdb_id}`)) ids.add(row.media_id);
+    const found = this.kids.filter(rows.filter(row => ids.has(row.id)), profile).map(row => this.card(row, profile));
     const groups = new Map<string, { provider: MediaCard['provider']; items: MediaCard[] }>();
     groups.set(LOCAL_PROVIDER.id, { provider: LOCAL_PROVIDER, items: [] });
     for (const card of found) { const group = groups.get(card.provider.id) || { provider: card.provider, items: [] }; group.items.push(card); groups.set(card.provider.id,group); }

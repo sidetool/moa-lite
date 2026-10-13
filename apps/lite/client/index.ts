@@ -1,3 +1,5 @@
+import { translationRetry, translationDelay } from './translation-retry';
+import { materializeInline, releaseInline, releaseAllInline } from './inline-playback';
 export { getConnectorStatus, onConnectorStatusChange, type ConnectorStatus } from './connector';
 import { PROFILE_HEADER, type Account } from '@moa/shared';
 import { accountLock, readState, writeState } from './storage';
@@ -166,13 +168,15 @@ function runTranslation(id: string, profile: string | null) {
         try { output = await cloud('/lite/translate', { lines: step.lines, context: step.context }, 'POST', abort.signal); break; }
         catch (failure: any) {
           error = failure.code ?? failure.message; if (abort.signal.aborted) return;
-          if (failure.code === 'translation-busy') { attempt--; await new Promise(resolve => setTimeout(resolve, Math.max(100, Math.min(60000, failure.retryAfter || 1000)))); continue; }
-          if (attempt < step.retryCount) await new Promise(resolve => setTimeout(resolve, Math.max(1000, step.interval)));
+          if (failure.code === 'translation-busy') { attempt--; await translationDelay(Math.max(100, Math.min(60000, failure.retryAfter || 1000)), abort.signal); continue; }
+          const delay = translationRetry(error, attempt, step.retryCount, step.keyCount ?? 1, step.interval);
+          if (delay === null) break;
+          await translationDelay(delay, abort.signal);
         }
       }
       await local('/lite/job/commit', { id, ...(output ? { output } : { error }) }, 'POST', abort.signal, profile);
       if (!output) break;
-      await new Promise(resolve => setTimeout(resolve, step.interval));
+      await translationDelay(step.interval, abort.signal);
     }
   }).catch(() => {}).finally(() => jobs.delete(id));
 }
@@ -181,7 +185,7 @@ export async function liteFetch(path: string, init: RequestInit): Promise<Respon
   const profile = new Headers(init.headers).get(PROFILE_HEADER) ?? localStorage.getItem('moa.profile');
   try {
     const endpoint = path.replace(/^\/api/, '');
-    if (endpoint.startsWith('/playback/') && init.method === 'DELETE') releaseMedia(endpoint.split('/')[2]);
+    if (endpoint.startsWith('/playback/') && init.method === 'DELETE') { releaseMedia(endpoint.split('/')[2]); releaseInline(endpoint.split('/')[2]); }
     if (remote.test(endpoint)) {
       const response = await fetch(path, init);
       if (endpoint === '/me' && response.ok && actor) {
@@ -201,8 +205,8 @@ export async function liteFetch(path: string, init: RequestInit): Promise<Respon
     const translationId = /^\/translations\/([^/?]+)$/.exec(endpoint)?.[1];
     if (method === 'DELETE' && translationId) jobs.get(translationId)?.abort();
     const value = await local(endpoint, body, method, init.signal ?? undefined, profile);
-    if (endpoint === '/playback' && value) { try { if (await prepareMedia(value.sessionId, value.url, value.headers, value.mime)) value.transport = 'connector'; } catch { /* Direct playback remains available without connector permission. */ } }
-    if (endpoint.startsWith('/playback/') && method === 'DELETE') releaseMedia(endpoint.split('/')[2]);
+    if (endpoint === '/playback' && value) { const inline = materializeInline(value); try { if (await prepareMedia(value.sessionId, inline?.url ?? value.url, inline?.headers ?? value.headers, value.mime, inline?.playlist)) value.transport = 'connector'; } catch { /* Direct playback remains available without connector permission. */ } }
+    if (endpoint.startsWith('/playback/') && method === 'DELETE') { releaseMedia(endpoint.split('/')[2]); releaseInline(endpoint.split('/')[2]); }
     if (value?.state && ['queued', 'running'].includes(value.state) && value.id) runTranslation(value.id, profile);
     if (endpoint === '/progress') scheduleSync(10000);
     else if (method !== 'GET') scheduleSync();
@@ -224,7 +228,7 @@ function resetRuntime() {
   if (actor) clearImageTickets(actor.id);
   clearTimeout(syncTimer); for (const abort of jobs.values()) abort.abort();
   for (const abort of hostRequests.values()) abort.abort(); hostRequests.clear();
-  releaseAllMedia(); for (const url of blobs.values()) URL.revokeObjectURL(url); blobs.clear(); imageTickets.clear();
+  releaseAllMedia(); releaseAllInline(); for (const url of blobs.values()) URL.revokeObjectURL(url); blobs.clear(); imageTickets.clear();
   active?.reject(Object.assign(new Error('login-required'), { status: 401 })); active = undefined;
   worker?.terminate(); worker = undefined; actor = undefined; bootstrap = undefined; config = undefined; configAt = 0;
   localStorage.removeItem('moa.profile');
@@ -238,3 +242,5 @@ channel?.addEventListener('message', event => {
   else if (actor && (event.data.activeAccountId && event.data.activeAccountId !== actor.id)) { resetRuntime(); window.dispatchEvent(new Event('moa:profile-required')); }
   else if (event.data.accountId === actor?.id) window.dispatchEvent(new Event('moa-lite:changed'));
 });
+
+window.addEventListener('pagehide', releaseAllInline);

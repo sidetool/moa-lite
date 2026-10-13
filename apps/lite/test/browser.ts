@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import { chromium, type Page, type BrowserContext } from 'playwright-core';
 import { build } from 'esbuild';
@@ -44,7 +44,7 @@ const server = createServer(async (req, res) => {
 await new Promise<void>(resolve => server.listen(5190, '127.0.0.1', resolve));
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? chromium.executablePath(), headless: true, args: ['--no-sandbox'] });
 const errors: string[] = [];
-async function pageFor(context: BrowserContext) { const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); return page; }
+async function pageFor(context: BrowserContext) { const page = await context.newPage(); page.setDefaultTimeout(30000); page.on('pageerror', error => errors.push(error.message)); return page; }
 async function api(page: Page, path: string, body?: any, method = body === undefined ? 'GET' : 'POST') {
   return page.evaluate(async ({ path, body, method }) => {
     const { liteFetch } = await import('/testing/api.js' as string);
@@ -185,7 +185,7 @@ try {
   const entry = { ...registry[0], id: '123', format: 'mangayomi-js' };
   const invoke = async (code: string, timeoutMs = 100) => a.evaluate(async ({ source, entry, timeoutMs }) => {
     const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source)))].map(x => x.toString(16).padStart(2, '0')).join('');
-    return new Promise<any>((resolve, reject) => { const worker = new Worker('/runtime/source-worker.js', { type: 'module' }); const timer = setTimeout(() => { worker.terminate(); reject(new Error('worker-test-timeout')); }, 5000); worker.onmessage = ({ data }) => { if (['result', 'failure'].includes(data.type)) { clearTimeout(timer); worker.terminate(); resolve(data); } }; worker.postMessage({ type: 'invoke', bundle: { source, entry, codeDigest: digest, action: 'list', preferences: {}, timeoutMs } }); });
+    return new Promise<any>((resolve, reject) => { const worker = new Worker('/runtime/source-worker.js', { type: 'module' }); const timer = setTimeout(() => { worker.terminate(); reject(new Error('worker-test-timeout')); }, 5000); worker.onerror = event => { clearTimeout(timer); worker.terminate(); resolve({type:'failure',code:'execution_failed',message:event.message}); }; worker.onmessage = ({ data }) => { if (['result', 'failure'].includes(data.type)) { clearTimeout(timer); worker.terminate(); resolve(data); } }; worker.postMessage({ type: 'invoke', bundle: { source, entry, codeDigest: digest, action: 'list', preferences: {}, timeoutMs } }); });
   }, { source: code, entry, timeoutMs });
   const loop = await invoke('class DefaultExtension extends MProvider { async getPopular(){while(true){}} }'); assert.equal(loop.code, 'execution_timeout');
   const memory = await invoke('class DefaultExtension extends MProvider { async getPopular(){const values=[];while(true)values.push(new Array(100000).fill("memory"));} }', 1000); assert.equal(memory.type, 'failure');
@@ -203,8 +203,10 @@ try {
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
   await a.getByRole('button', { name: /한국어 ASS/ }).click();
   await a.waitForFunction(() => [...document.querySelectorAll('canvas')].some(canvas => canvas.width > 0 && canvas.height > 0));
+  console.log('PASS initial ASS canvas');
   await a.reload();
   await a.waitForFunction(() => [...document.querySelectorAll('canvas')].some(canvas => canvas.width > 0 && canvas.height > 0));
+  console.log('PASS restored ASS canvas');
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
   await a.evaluate(async () => { await document.querySelector('video')!.play(); });
   await a.waitForFunction(() => document.querySelector('video')!.currentTime > 1.7);
@@ -218,7 +220,7 @@ try {
   await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => track.mode === 'showing' && !!track.cues?.length));
   console.log('PASS original JASSUB Korean ASS rendering and VTT track switching');
   // The selected track survives reload; custom VTT styling travels with the same video into PiP.
-  await a.evaluate(() => localStorage.setItem('moa.subtitleAppearance', JSON.stringify({ size: 'large', background: 'soft' })));
+  await a.evaluate(() => { const key = `moa.deviceSettings:${JSON.stringify([localStorage.getItem('moa-lite.account'),localStorage.getItem('moa.profile')])}`; localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)||'{}'),subtitleSize:'large',subtitleBackground:'soft'})); });
   await a.reload();
   await a.waitForFunction(() => document.querySelector('video')?.readyState! >= 2);
   await a.evaluate(() => { const v = document.querySelector('video')!; v.pause(); v.currentTime = 1; (window as any).__pipVideo = v; });
@@ -233,7 +235,7 @@ try {
   await a.evaluate(() => (window as any).documentPictureInPicture.window.close());
   await a.waitForFunction(() => document.querySelector('video') === (window as any).__pipVideo);
   assert(await a.locator('.subtitle-cue').count() > 0);
-  await a.evaluate(() => localStorage.removeItem('moa.subtitleAppearance'));
+  await a.evaluate(() => { const key = `moa.deviceSettings:${JSON.stringify([localStorage.getItem('moa-lite.account'),localStorage.getItem('moa.profile')])}`; localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)||'{}'),subtitleSize:'medium',subtitleBackground:'original'})); });
   await a.reload();
   await a.waitForFunction(() => [...(document.querySelector('video')?.textTracks ?? [])].some(track => track.mode === 'showing' && !!track.cues?.length));
   await a.getByRole('button', { name: '자막 및 음성', exact: true }).click({ force: true });
@@ -272,11 +274,12 @@ try {
   await api(a, '/settings', { navigation: ['home', 'movies', 'anime', 'series'].map((id, index) => ({ id, name: ['홈', '영화', '애니', '시리즈'][index], sourceIds: [sourceId], includeLocal: false })) }, 'PATCH');
   await compareOriginalUi(browser, a, path => api(a, path), profile.id, media.id, artifacts);
   await a.setViewportSize({ width: 390, height: 844 });
-  await a.goto(origin + '/settings');
+  await a.goto(origin + '/settings#playback');
   const quality = a.getByRole('combobox', { name: 'preferredQuality', exact: true });
   await quality.click();
   await a.getByRole('option', { name: '720p', exact: true }).click();
   await a.waitForFunction(() => document.querySelector('[aria-label="preferredQuality"]')?.textContent?.includes('720p'));
+  await a.goto(origin + '/settings#tabs');
   const reset = a.locator('#tabs').getByRole('button', { name: '기본값', exact: true });
   await reset.click();
   const confirmation = a.getByRole('alertdialog', { name: '탭 초기화' });
@@ -287,6 +290,7 @@ try {
   assert(await reset.evaluate(el => el === document.activeElement));
   console.log('PASS mobile settings dropdown selection and confirmation cancellation/focus restoration');
   await a.evaluate(() => { localStorage.setItem('moa.remoteMode', 'on'); window.dispatchEvent(new Event('moa:remote-mode')); });
+  await a.goto(origin + '/settings#playback');
   await quality.focus(); await quality.press('Enter'); await quality.press('Home'); await quality.press('ArrowDown'); await quality.press('Enter');
   await a.waitForFunction(() => document.querySelector('[aria-label="preferredQuality"]')?.textContent?.includes('1080p'));
   await a.evaluate(() => { localStorage.setItem('moa.remoteMode', 'off'); window.dispatchEvent(new Event('moa:remote-mode')); });
@@ -369,4 +373,11 @@ try {
   console.log('PASS existing MOA desktop/mobile title UI, SPA direct entry, no video transfer through API, no browser errors');
   await readFile(resolve(root, 'apps/web/dist/runtime/quickjs.wasm'));
   console.log('Browser verification complete. Artifacts: ' + artifacts);
+} catch (error) {
+  console.error('Browser errors:',errors);
+  for (const [i,page] of browser.contexts().flatMap(c=>c.pages()).entries()) {
+    await page.screenshot({path:resolve(artifacts,`failure-${i}.png`)}).catch(()=>{});
+    await writeFile(resolve(artifacts,`failure-${i}.html`),await page.content()).catch(()=>{});
+  }
+  throw error;
 } finally { releaseTranslation?.(); await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

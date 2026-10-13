@@ -5,6 +5,7 @@ export async function sourceHttp(input: any, signal: AbortSignal, transport = co
   if (!input || typeof input.url !== 'string' || /\.(?:mp4|m4v|mov|flv|webm|m4s|mkv|ts|mp3|aac)(?:[?#]|$)/i.test(input.url)) throw new Error('video-relay-unavailable');
   if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(input.method ?? 'GET') || typeof input.body === 'string' && Buffer.byteLength(input.body) > 512 * 1024) throw new Error('invalid-source-invocation');
   const policy = compatibilityHttpPolicy(input.options);
+  if (input.options?.browserSession) throw new Error('source_browser_unavailable');
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(policy.timeoutMs)]);
   const result = transport === compatibilityHttp
     ? await withByeDpi(deadline, proxy => transport(input, deadline, [], 2 * 1024 * 1024, proxy))

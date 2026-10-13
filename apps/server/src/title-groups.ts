@@ -134,6 +134,26 @@ export class TitleGroups {
         sourceCount: new Set(cards.map(c => c.provider.id)).size };
     });
   }
+  continueWatching(recent: MediaCard[], candidates: Record<string, any>[], profile: string): MediaCard[] {
+    if (!recent.length) return [];
+    const mapping = this.mapping(profile), members = new Map<string, Record<string, any>[]>(), seen = new Set<string>();
+    for (const row of candidates) {
+      const key = mapping.get(row.id) ?? row.id;
+      const group = members.get(key) ?? []; group.push(row); members.set(key, group);
+    }
+    return recent.flatMap(card => {
+      const key = mapping.get(card.id) ?? card.id;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      if (!card.resume) return [];
+      const group = members.get(key)!.map(row => this.catalog.card(row, profile));
+      const rank = (item: MediaCard) => item.provider.lang === 'ko' ? 0 : item.provider.lang === 'all' || item.provider.kind === 'local' ? 1 : 2;
+      const representative = group.reduce((best, item) => rank(item) < rank(best) ? item : best);
+      return [{ ...representative, resume: card.resume, progress: card.progress,
+        sourceCount: new Set(group.map(item => item.provider.id)).size,
+        langs: [...new Set(group.flatMap(item => item.provider.lang ? [item.provider.lang] : []))].sort() }];
+    });
+  }
   change(id: string, profile: string, action: string, otherId?: string) {
     const group = this.group(id,profile), db = this.catalog.db;
     db.transaction(() => {
@@ -148,12 +168,8 @@ export class TitleGroups {
     return this.group(id,profile);
   }
   candidates(q: string, profile: string) {
-    const needle = normalize(q), map = this.mapping(profile);
-    if (!needle) return [];
-    return this.catalog.db.all(`SELECT m.*,t.card AS tmdb_card FROM media m
-      LEFT JOIN tmdb_links l ON l.media_id=m.id AND l.status IN ('auto','manual')
-      LEFT JOIN tmdb_titles t ON t.kind=l.kind AND t.tmdb_id=l.tmdb_id`)
-      .filter(r => map.has(r.id) && (normalize(r.title).includes(needle) || r.tmdb_card && normalize(JSON.parse(r.tmdb_card).title || '').includes(needle)))
-      .slice(0,40).map(r => this.catalog.card(r,profile));
+    if (!normalize(q)) return [];
+    const map = this.mapping(profile);
+    return this.catalog.search(profile, q).groups.flatMap(group => group.items).filter(card => map.has(card.id)).slice(0,40);
   }
 }

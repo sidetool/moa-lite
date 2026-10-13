@@ -1,3 +1,5 @@
+import { identitySchema, workIdentity, episodeIdentity, restoreIdentities } from './source-identity-sync.js';
+import { SourceIdentities } from '../../server/src/source-identity.js';
 import { selectPlaybackStream } from './playback-streams.js';
 import { subtitleSearchTtl, reuseSubtitleSearch } from './subtitle-cache.js';
 import { mergeBackground } from './background-state.js';
@@ -23,7 +25,7 @@ import { compatibilityHttp } from './extensions.js';
 import type { Account, PlaybackSession, SubtitleTrack } from '@moa/shared';
 
 const SQL = initSqlJs({ locateFile: () => '/runtime/sql-wasm.wasm' });
-const primary: Record<string, string[]> = { profiles: ['id'], settings: ['id'], media: ['id'], episodes: ['id'], source_media: ['media_id'], source_episodes: ['episode_id'], source_images: ['id'], tmdb_links: ['media_id'], progress: ['profile_id', 'episode_id'], watchlist: ['profile_id', 'media_id'], title_group_overrides: ['profile_id', 'media_id'] };
+const primary: Record<string, string[]> = { profiles: ['id'], settings: ['id'], media: ['id'], episodes: ['id'], source_media: ['media_id'], source_episodes: ['episode_id'], source_images: ['id'], tmdb_links: ['media_id'], progress: ['profile_id', 'episode_id'], watchlist: ['profile_id', 'media_id'], title_group_overrides: ['profile_id', 'media_id'], lite_work_identity: ['media_id'], lite_episode_identity: ['episode_id'] };
 const order = Object.keys(primary);
 let database: SqliteDatabase, db: Store, catalog: Catalog, sources: Sources, groups: TitleGroups, franchises: Franchises, tmdb: Tmdb;
 let actor: Account, config: any, syncState: any, shared: any;
@@ -60,6 +62,7 @@ async function initialize(state: any, account: Account, settings: any) {
   shared = state?.shared ?? { revision: 0, value: null };
   db.db.exec(`CREATE TABLE IF NOT EXISTS lite_jobs(id TEXT PRIMARY KEY,profile TEXT NOT NULL,episode TEXT NOT NULL,payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS lite_searches(id TEXT PRIMARY KEY,profile TEXT NOT NULL,episode TEXT NOT NULL,payload TEXT NOT NULL,expires INTEGER NOT NULL)`);
+  identitySchema(db);
   database.onWrite = checkpoint;
   sharedBaseline = JSON.stringify(shared.pending ?? shared.value ?? sharedValue());
 }
@@ -87,6 +90,9 @@ function snapshotRows() {
       }
     }
     put('episodes', episodes);
+    const identity = workIdentity(db, id);
+    if (identity) put('lite_work_identity', [identity]);
+    for (const episode of episodes) put('lite_episode_identity', [episodeIdentity(db, episode.id)]);
     for (const episode of episodes) put('source_episodes', db.all('SELECT * FROM source_episodes WHERE episode_id=?', episode.id));
     const row = db.get('SELECT metadata FROM media WHERE id=?', id);
     const metadata = row && JSON.parse(row.metadata);
@@ -130,17 +136,20 @@ function applyRows(rows: Record<string, any>) {
       db.run(`DELETE FROM ${table} WHERE ${primary[table].map(k => k + '=?').join(' AND ')}`, ...identity.slice(1));
     }
   });
+  restoreIdentities(db);
   for (const [key, row] of Object.entries(rows)) { syncState.rows[key] = row; delete syncState.pending[key]; }
 }
 function applyShared(value: any) {
   if (!value) return;
+  const identities = new SourceIdentities(db);
   db.transaction(() => {
-    for (const row of value.sources) { const old = db.get('SELECT * FROM source_entries WHERE id=?', row.id); if (old && ['sha256','preferences','enabled','type','live'].some(key => old[key] !== row[key])) sources.invalidate(row.id); }
+    for (const row of value.sources) { const old = db.get('SELECT * FROM source_entries WHERE id=?', row.id); if (old?.installed_entry) identities.sync(row.id, JSON.parse(old.installed_entry).baseUrl || ''); if (old && ['installed_entry','sha256','preferences','enabled','type','live'].some(key => old[key] !== row[key])) sources.invalidate(row.id); }
     const installed = new Set(value.sources.map((row: any) => row.id));
     for (const row of db.all('SELECT id FROM source_entries WHERE code IS NOT NULL')) if (!installed.has(row.id)) db.run('UPDATE source_entries SET code=NULL,installed_entry=NULL,enabled=0 WHERE id=?', row.id);
     db.run('UPDATE source_repositories SET active=0');
     for (const repo of value.repositories) db.run('INSERT INTO source_repositories(url,active,kind,checked_at,error) VALUES(?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET active=excluded.active,kind=excluded.kind', repo.url, repo.active, repo.kind, repo.checked_at, repo.error);
     for (const row of value.sources) db.run(`INSERT INTO source_entries(id,repository,entry,installed_entry,code,sha256,preferences,enabled,type,live) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET repository=excluded.repository,entry=excluded.entry,installed_entry=excluded.installed_entry,code=excluded.code,sha256=excluded.sha256,preferences=excluded.preferences,enabled=excluded.enabled,type=excluded.type,live=excluded.live`, ...['id', 'repository', 'entry', 'installed_entry', 'code', 'sha256', 'preferences', 'enabled', 'type', 'live'].map(k => row[k]));
+    for (const row of value.sources) if (db.get('SELECT 1 FROM source_address_state WHERE source_id=?', row.id)) identities.sync(row.id, JSON.parse(row.installed_entry || row.entry).baseUrl || '');
     db.run('DELETE FROM source_backups');
     for (const row of value.backups ?? []) if (installed.has(row.source_id)) db.run('INSERT INTO source_backups VALUES(?,?,?,?,?)', row.source_id, row.entry, row.code, row.sha256, row.preferences);
     db.saveDefaultNavigation(value.navigation ?? null);
@@ -211,7 +220,7 @@ async function playback(pid: string, body: any): Promise<PlaybackSession> {
   }
   for (const row of db.all('SELECT * FROM online_subtitles WHERE episode_id=?', ep.id)) subtitles.push(track(row.content, row.format, { id: row.id, label: row.creator_name + ' · 한국어', lang: 'ko', source: 'online', provenance: { creatorName: row.creator_name, sourceUrl: row.source_url } }));
   for (const row of db.all('SELECT payload FROM lite_jobs WHERE episode=? AND profile=?', ep.id, pid)) { const view = jobView(JSON.parse(row.payload)); if (view.track) subtitles.push(view.track); }
-  const session: PlaybackSession = { sessionId: randomUUID(), episodeId: ep.id, mediaId: detail.id, mediaTitle: detail.title, mediaType: playbackMediaType(db, detail.id, detail.type), episodeTitle: ep.title, episodeLabel: `S${ep.season}:E${ep.number}`, mode: 'direct', url: item.url, mime: remoteMediaType(item.url), headers: item.headers ?? {}, transport: 'direct', live, duration: ep.duration || 0, streams, streamId, startPosition: live ? 0 : body.startPosition ?? (list.find(e => e.id === ep.id)?.progress?.completed ? 0 : list.find(e => e.id === ep.id)?.progress?.position ?? 0), subtitles, audioTracks: [], next: !live && next ? { episodeId: next.id, title: detail.title, label: next.title, thumb: next.thumb } : null };
+  const session: PlaybackSession = { sessionId: randomUUID(), episodeId: ep.id, mediaId: detail.id, mediaTitle: detail.title, mediaType: playbackMediaType(db, detail.id, detail.type), episodeTitle: ep.title, episodeLabel: `S${ep.season}:E${ep.number}`, mode: 'direct', ...(item.url.startsWith('data:') && item.originalUrl ? { originalUrl: item.originalUrl } : {}), url: item.url, mime: remoteMediaType(item.url), headers: item.headers ?? {}, transport: 'direct', live, duration: ep.duration || 0, streams, streamId, startPosition: live ? 0 : body.startPosition ?? (list.find(e => e.id === ep.id)?.progress?.completed ? 0 : list.find(e => e.id === ep.id)?.progress?.position ?? 0), subtitles, audioTracks: [], next: !live && next ? { episodeId: next.id, title: detail.title, label: next.title, thumb: next.thumb } : null };
   sessions.set(session.sessionId, session); return session;
 }
 async function dispatch(path: string, method: string, body: any, pid: string | null): Promise<any> {
@@ -266,7 +275,7 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
     for (const row of repair) resumeHydrated.add(actor.id + ":" + prof + ":" + row.media_id);
     await Promise.allSettled(repair.map(row => sources.detail(row.media_id)));
 
-    const read = () => catalog.home(prof, q.type as any, q.providers?.split(','), q.continueScope as any);
+    const read = () => catalog.home(prof, q.type as any, q.providers?.split(','), q.continueScope as any, q.watchlistScope as any, q.titleGrouping === 'false' ? undefined : (recent, candidates) => groups.continueWatching(recent, candidates, prof));
     let home = read();
     const ids = home.rows.flatMap(row => row.items.map(card => card.id)).filter(id => !db.get('SELECT 1 FROM tmdb_links WHERE media_id=?', id));
     if (tmdb.enabled && ids.length) { await tmdb.ensure([...new Set(ids)], 1500); home = read(); }
@@ -305,7 +314,9 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
     const ep = episode(id); catalog.kids.assert(ep.media_id, prof);
     if (parts[2] === 'context') return { mediaId: ep.media_id, season: ep.season, number: ep.number };
     if (parts[2] === 'markers') {
-      const duration = Number(q.duration) || ep.duration;
+      if (q.sessionId && sessions.get(q.sessionId)?.episodeId !== id) throw new ApiFailure(409, 'playback-session-expired');
+      const duration = Number(q.duration);
+      if (!Number.isFinite(duration) || duration < 60 || duration > 86400) return { markers: null, status: 'unavailable' };
       if (playbackMediaType(db, ep.media_id, ep.type) !== 'anime' || duration <= 0) return { markers: null };
       const query = subtitleQuery(db, ep);
       const api = new AniSkipClient({ cache: {
@@ -370,7 +381,7 @@ async function dispatch(path: string, method: string, body: any, pid: string | n
     const lines = batch.length ? batch : nextBatch(doc.lines, job.output, 0, config.translation.batchSize);
     if (!lines.length) { job.state = 'completed'; saveJob(job); return null; }
     job.state = 'running'; job.revision++; saveJob(job);
-    return { lines, context: { title: episode(job.episode).original_title, sourceLanguage: job.sourceLanguage }, interval: config.translation.requestIntervalMs, retryCount: config.translation.retryCount };
+    return { lines, context: { title: episode(job.episode).original_title, sourceLanguage: job.sourceLanguage }, interval: config.translation.requestIntervalMs, retryCount: config.translation.retryCount, keyCount: config.translation.keys?.length ?? 1 };
   }
   if (p === '/lite/job/commit') {
     const job = getJob(body.id, prof); if (job.state === 'cancelled') return null;

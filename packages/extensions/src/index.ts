@@ -9,3 +9,5 @@ export * from './repository.js';
 export { publicStream } from "./stream.js";
 
 export { parseOutboundProxy, pinnedProxyAgent } from './proxy.js';
+
+export type { CompatibilityHttpInput } from './http.js';

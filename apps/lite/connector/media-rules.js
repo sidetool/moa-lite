@@ -18,13 +18,13 @@ export function mediaRules(request, reader, tabId, firstId, urls = []) {
   }));
 }
 
-export function playlistUrls(text, base) {
+export function playlistUrls(text, base, maximum = 2000) {
   if (!text.startsWith('#EXTM3U')) return [];
   const result = [];
   for (const line of text.split(/\r?\n/)) {
     const values = line.startsWith('#') ? [...line.matchAll(/URI="([^"]+)"/g)].map(match => match[1]) : line.trim() ? [line.trim()] : [];
     for (const value of values) { try { const url = new URL(value, base); if (url.protocol === 'https:') result.push(url.href); } catch {} }
-    if (result.length > 2000) break;
+    if (result.length >= maximum) break;
   }
   return result;
 }

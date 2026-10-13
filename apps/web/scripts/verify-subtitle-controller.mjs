@@ -70,7 +70,7 @@ async function harness({ importGate, readyGate, constructorError, destroyError, 
   return { controller: new module.namespace.SubtitleController(video), tracks, renderers, swaps, styleWrites, eventWrites };
 }
 
-test('VTT load applies controls lift with zero offset and supports saved height and keeps a minimum bottom inset', async () => {
+test('VTT restores native cue placement after controls lift or custom height is reset', async () => {
   const { controller, tracks } = await harness();
   controller.setLift(true);
   await controller.show(vtt);
@@ -78,11 +78,11 @@ test('VTT load applies controls lift with zero offset and supports saved height 
   tracks[0].dispatchEvent(new Event('load'));
   assert.equal(tracks[0].track.cues[0].line, -3);
   controller.setLift(false);
-  assert.equal(tracks[0].track.cues[0].line, -1);
+  assert.equal(tracks[0].track.cues[0].line, 'auto');
   controller.setHeight(25);
   assert.equal(tracks[0].track.cues[0].line,-5);
   controller.setHeight(0);
-  assert.equal(tracks[0].track.cues[0].line, -1);
+  assert.equal(tracks[0].track.cues[0].line, 'auto');
   const positioned = { ...cue(), line: 20, snapToLines: false, lineAlign: 'center' };
   tracks[0].track.cues = [positioned];
   controller.setLift(true);
@@ -103,8 +103,8 @@ test('ASS defaults preserve authored styles and background overrides restore inl
   assert.equal(styleWrites.length, 0);
   assert.equal(eventWrites.length, 0);
   await controller.setAppearance({ size: 'medium', background: 'soft' });
-  assert.equal(styleWrites.at(-1).style.BorderStyle, 3);
-  assert.equal(styleWrites.at(-1).style.OutlineColour, 0x80);
+  assert.equal(styleWrites.at(-1).style.BorderStyle, 4);
+  assert.equal(styleWrites.at(-1).style.BackColour, 0x80);
   assert.equal(styleWrites.at(-1).style.Alignment, 8);
   assert.equal(eventWrites.at(-1).event.Text, '{\\pos(60,40)\\1a&H80&\\2a&H80&}SIGN{\\rDefault} subtitle');
   await controller.setAppearance({ size: 'large', background: 'solid' });
@@ -149,6 +149,41 @@ test('VTT positive/negative offsets are absolute, survive switches, and apply af
   assert.equal(tracks[0].track.cues[0].startTime, 2);
   await controller.show(null);
   assert.equal(tracks.length, 0);
+});
+
+test('ASS shadow and outline controls preserve unrelated overrides and restore authored effects', async () => {
+  const style = { FontSize: 32, BorderStyle: 1, Outline: 2, Shadow: 1, OutlineColour: 0xff, BackColour: 0xff };
+  const event = { Text: '{\\pos(60,40)\\bord0\\shad0\\3c&HFFFFFF&\\4a&HFF&}Text' };
+  const { controller, styleWrites, eventWrites } = await harness({ styles: [style], events: [event] });
+  await controller.show(ass);
+  await controller.setAppearance({ size: 'medium', background: 'original', shadow: 'strong' });
+  assert.equal(styleWrites.at(-1).style.Shadow, 4);
+  assert.equal(styleWrites.at(-1).style.Outline, 2);
+  assert.equal(eventWrites.at(-1).event.Text, '{\\pos(60,40)\\bord0\\3c&HFFFFFF&}Text');
+  await controller.setAppearance({ size: 'medium', background: 'original', shadow: 'none', outline: 'thick' });
+  assert.equal(styleWrites.at(-1).style.Shadow, 0);
+  assert.equal(styleWrites.at(-1).style.Outline, 3);
+  assert.equal(eventWrites.at(-1).event.Text, '{\\pos(60,40)}Text');
+  await controller.setAppearance({ size: 'medium', background: 'original' });
+  assert.equal(JSON.stringify(styleWrites.at(-1).style), JSON.stringify(style));
+  assert.equal(eventWrites.at(-1).event.Text, event.Text);
+});
+
+test('numeric subtitle appearance preserves zero overrides and restores authored styles', async () => {
+  const original = { FontSize: 32, BorderStyle: 1, Outline: 3, Shadow: 2, OutlineColour: 0xff, BackColour: 0xff };
+  const { controller, styleWrites } = await harness({ styles: [original] });
+  await controller.show(ass);
+  await controller.setAppearance({ size: 'medium', scale: 125, background: 'original', shadow: 2.5, outline: 1.2 });
+  assert.equal(styleWrites.at(-1).style.FontSize, 40);
+  assert.equal(styleWrites.at(-1).style.Shadow, 2.5);
+  assert.equal(styleWrites.at(-1).style.Outline, 1.2);
+  await controller.setAppearance({ size: 'medium', background: 'original', shadow: 0, outline: 0 });
+  assert.equal(styleWrites.at(-1).style.Shadow, 0);
+  assert.equal(styleWrites.at(-1).style.Outline, 0);
+  await controller.setAppearance({ size: 'medium', background: 'soft', padding: 8 });
+  assert.equal(styleWrites.at(-1).style.Shadow, 8);
+  await controller.setAppearance({ size: 'medium', background: 'original' });
+  assert.equal(JSON.stringify(styleWrites.at(-1).style), JSON.stringify(original));
 });
 
 for (const action of ['clear', 'destroy', 'off', 'vtt']) {

@@ -73,7 +73,10 @@ async function invoke(bundle) {
       return null;
     }
     if (['metadata', 'preferences'].includes(bundle.action)) throw new Error('permission_denied');
-    if (method === 'compatibility.http') return http(input);
+    if (method === 'compatibility.http') {
+      if (input?.options?.browserSession) throw new Error('source_browser_unavailable');
+      return http(input);
+    }
     if (method === 'compatibility.webview') {
       if (!Array.isArray(input?.scripts) || input.scripts.length > 32 || input.scripts.some(s => typeof s !== 'string' || s.length > 65536))
         throw new Error('invalid_source_invocation');

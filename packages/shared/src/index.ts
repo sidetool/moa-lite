@@ -280,6 +280,8 @@ export interface PlaybackSession {
   headers?: Record<string, string>;
   /** APK process must stay alive; client sends heartbeats while paused and can recreate an expired session once. */
   runtimeDependent?: boolean;
+  /** Declared media origin for credential scoping of extension-generated inline HLS. */
+  originalUrl?: string;
   sessionId: string;
   episodeId: string;
   /** Shown in the player's title bar. */
@@ -311,6 +313,7 @@ export interface PlaybackSession {
     /** End of the ending song; content after it (post-credits scene) is still part of the episode. */
     creditsEnd?: number;
     source?: "manual" | "fingerprint" | "aniskip";
+    provenance?: { intro?: "manual" | "fingerprint" | "aniskip"; credits?: "manual" | "fingerprint" | "aniskip" };
   };
   /** Font URLs for ASS rendering (attachments in MKV). */
   fonts?: string[];
@@ -353,6 +356,12 @@ export interface Settings {
   autoplayDelay: number;
   defaultSubtitleLang: string;
   subtitleSize: "small" | "medium" | "large" | "xlarge";
+  subtitleScale?: number | null;
+  subtitleBackground?: "original" | "none" | "soft" | "solid";
+  subtitleShadow?: number | null;
+  subtitleOutline?: number | null;
+  subtitleHeight?: number;
+  subtitlePadding?: number;
   preferredQuality: "auto" | "1080" | "720" | "480";
   hardwareTranscoding: boolean;
   /** Search Korean subtitles online when an anime episode has none. */
@@ -383,6 +392,7 @@ export interface VideoSource {
 }
 export interface SourcePreference {
   key: string; title: string; summary?: string; kind: "text" | "boolean" | "select" | "multi-select";
+  disabled?: boolean;
   secret: boolean; configured?: boolean; value?: string | boolean | number | string[];
   choices?: readonly { label: string; value: string | number }[];
 }
@@ -446,3 +456,8 @@ export interface JimakuSearch {
 }
 
 export type { RemoteAccessMode, RemoteAccessState, RemoteAccessConfig, RemoteAccessConfigure, RemoteAccessStatus } from './remote-access.js';
+
+export type DeviceSettings = Pick<Settings, 'subtitleSize' | 'subtitleScale' | 'subtitleBackground' | 'subtitleShadow' | 'subtitleOutline' | 'subtitleHeight' | 'subtitlePadding'> & {
+  fullscreenOnPlay: boolean; autoSkip: boolean; seekStep: 5 | 10 | 15 | 30; videoFill: boolean; seasonSwitcher: boolean; titleGrouping: boolean;
+};
+export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = { fullscreenOnPlay: true, autoSkip: false, seekStep: 10, videoFill: false, seasonSwitcher: true, titleGrouping: true, subtitleSize: 'medium', subtitleScale: null, subtitleBackground: 'original', subtitleShadow: null, subtitleOutline: null, subtitleHeight: 0, subtitlePadding: 6 };

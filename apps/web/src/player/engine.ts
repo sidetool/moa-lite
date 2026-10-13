@@ -82,7 +82,7 @@ async function hlsSupported() {
 
 type Jassub = Pick<import("jassub").default, "destroy" | "ready" | "timeOffset" | "renderer" | "resize" | "_demandRender" | "_lastDemandTime">;
 type AssStyle = Awaited<ReturnType<Jassub["renderer"]["getStyles"]>>[number];
-export type SubtitleAppearance = { size: "small" | "medium" | "large" | "xlarge"; background: "original" | "none" | "soft" | "solid" };
+export type SubtitleAppearance = { size: "small" | "medium" | "large" | "xlarge"; background: "original" | "none" | "soft" | "solid"; shadow?: "original" | "none" | "soft" | "strong" | number; outline?: "original" | "none" | "thin" | "thick" | number; scale?: number; padding?: number };
 
 /** Shows one subtitle track at a time: VTT via <track>, ASS via libass (JASSUB). */
 export class SubtitleController {
@@ -111,7 +111,7 @@ export class SubtitleController {
   private renderVtt = () => {
     const track = this.trackEl?.track, parent = this.video.parentElement;
     if (!track || !parent) return;
-    const native = this.appearance.background === "original" || document.pictureInPictureElement === this.video
+    const native = (this.appearance.background === "original" && (this.appearance.shadow === undefined || this.appearance.shadow === "original") && (this.appearance.outline === undefined || this.appearance.outline === "original")) || document.pictureInPictureElement === this.video
       || (this.video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen;
     track.mode = native ? "showing" : "hidden";
     if (native) { this.overlay?.remove(); this.overlay = null; return; }
@@ -128,6 +128,8 @@ export class SubtitleController {
     const width = Math.min(box.right, rect.left + (rect.width + contentWidth) / 2) - left, height = Math.min(box.bottom, rect.top + (rect.height + contentHeight) / 2) - top;
     Object.assign(this.overlay.style, { left: `${left - box.left}px`, top: `${top - box.top}px`, width: `${width}px`, height: `${height}px` });
     this.overlay.dataset.background = this.appearance.background;
+    this.overlay.dataset.shadow = String(this.appearance.shadow ?? "original");
+    this.overlay.dataset.outline = String(this.appearance.outline ?? "original");
     this.overlay.replaceChildren();
     const step = (parseFloat(style.fontSize) || 18) * 1.35, occupied: DOMRect[] = [];
     for (const cue of Array.from(track.activeCues ?? []) as VTTCue[]) {
@@ -137,6 +139,9 @@ export class SubtitleController {
       line.style.writingMode = vertical ? cue.vertical === "rl" ? "vertical-rl" : "vertical-lr" : "horizontal-tb";
       const fragment = cue.getCueAsHTML();
       for (const element of fragment.querySelectorAll("[class]")) element.removeAttribute("class");
+      if (typeof this.appearance.shadow === "number") text.style.textShadow = this.appearance.shadow ? `0 ${this.appearance.shadow}px ${this.appearance.shadow * 1.5}px #000` : "none";
+      if (typeof this.appearance.outline === "number") { text.style.webkitTextStroke = `${this.appearance.outline}px #000`; text.style.paintOrder = "stroke fill"; }
+      if (this.appearance.padding !== undefined) text.style.padding = `${this.appearance.padding / 2}px ${this.appearance.padding}px`;
       text.append(fragment); line.append(text); this.overlay.append(line);
       const align = cue.positionAlign === "auto" ? cue.align === "start" || cue.align === "left" ? 0 : cue.align === "end" || cue.align === "right" ? 1 : .5 : cue.positionAlign === "line-left" ? 0 : cue.positionAlign === "line-right" ? 1 : .5;
       const position = cue.position === "auto" ? align * 100 : cue.position;
@@ -159,32 +164,37 @@ export class SubtitleController {
     const renderer = this.ass, token = this.token;
     this.styling = this.styling.catch(() => {}).then(async () => {
       if (!renderer || token !== this.token || !this.originalStyles.length) return;
-      const { size, background } = this.appearance;
-      const originalAppearance = size === "medium" && background === "original";
+      const { size, background, shadow = "original", outline = "original", scale, padding = 6 } = this.appearance;
+      const originalEffects = background === "original" && shadow === "original" && outline === "original";
+      const originalAppearance = (scale === undefined ? size === "medium" : scale === 100) && originalEffects;
       if (originalAppearance && !this.styled) return;
       for (const [index, original] of this.originalStyles.entries()) {
         if (token !== this.token) return;
-        const style = { ...original, FontSize: original.FontSize * ({ small: .8, medium: 1, large: 1.3, xlarge: 1.65 }[size]) };
+        const style = { ...original, FontSize: original.FontSize * (scale === undefined ? { small: .8, medium: 1, large: 1.3, xlarge: 1.65 }[size] : scale / 100) };
         if (background === "soft" || background === "solid") {
-          style.BorderStyle = 3; style.Outline = 2; style.Shadow = 0;
-          style.OutlineColour = background === "soft" ? 0x80 : 0x00;
-          style.BackColour = style.OutlineColour;
+          style.BorderStyle = 4; style.Outline = 1.5; style.Shadow = padding;
+          style.OutlineColour = 0; style.BackColour = background === "soft" ? 0x80 : 0x00;
         } else if (background === "none") {
           style.BorderStyle = 1; style.Outline = 1.5; style.Shadow = 0; style.OutlineColour = 0;
         }
+        if (shadow !== "original" && background !== "soft" && background !== "solid") { style.Shadow = typeof shadow === "number" ? shadow : { none: 0, soft: 2, strong: 4 }[shadow]; style.BackColour = 0; }
+        if (outline !== "original") { style.Outline = typeof outline === "number" ? outline : { none: 0, thin: 1, thick: 3 }[outline]; style.OutlineColour = 0; }
         await renderer.renderer.setStyle(style, index);
       }
-      if (background !== "original" && !this.originalEvents) this.originalEvents = await renderer.renderer.getEvents();
+      if (!originalEffects && !this.originalEvents) this.originalEvents = await renderer.renderer.getEvents();
       for (const [index, event] of this.originalEvents?.entries() ?? []) {
         if (token !== this.token) return;
-        const Text = event.Text?.replace(/\{[^}]*\}/g, block => block
-          .replace(/\\(?:[xy]?(?:bord|shad)|[34][ca])[^\\})]*/gi, "")
-          .replace(/\\alpha(&H[0-9a-f]+&?)/gi, "\\1a$1\\2a$1"));
-        if (Text !== event.Text) await renderer.renderer.setEvent({ ...event, Text: background === "original" ? event.Text : Text } as Parameters<Jassub["renderer"]["setEvent"]>[0], index);
+        const Text = event.Text?.replace(/\{[^}]*\}/g, block => {
+          if (background !== "original") return block.replace(/\\(?:[xy]?(?:bord|shad)|[34][ca])[^\\})]*/gi, "").replace(/\\alpha(&H[0-9a-f]+&?)/gi, "\\1a$1\\2a$1");
+          if (shadow !== "original") block = block.replace(/\\(?:[xy]?shad|4[ca])[^\\})]*/gi, "");
+          if (outline !== "original") block = block.replace(/\\(?:[xy]?bord|3[ca])[^\\})]*/gi, "");
+          return block;
+        });
+        await renderer.renderer.setEvent({ ...event, Text } as Parameters<Jassub["renderer"]["setEvent"]>[0], index);
       }
       if (token !== this.token) return;
       this.styled = !originalAppearance;
-      if (background === "original") this.originalEvents = null;
+      if (originalEffects) this.originalEvents = null;
       if (token === this.token && renderer._lastDemandTime) await renderer._demandRender(true);
     });
     return this.styling;
@@ -308,7 +318,7 @@ export class SubtitleController {
   private cueRows = new WeakMap<VTTCue, { key: string; rows: number }>();
   private cuePositions = new WeakMap<VTTCue,{line:number|AutoKeyword;snapToLines:boolean;lineAlign:LineAlignSetting}>();
   setHeight(percent: number) {
-    this.height = Math.max(0, Math.min(30, Number.isFinite(percent) ? percent : 0));
+    this.height = Math.max(0, Math.min(40, Number.isFinite(percent) ? percent : 0));
     this.setLift(this.lifted);
   }
 
@@ -324,6 +334,8 @@ export class SubtitleController {
     const track = this.trackEl?.track;
     const cues = track?.cues;
     if (!cues) return;
+    const { size, scale, background, shadow = 'original', outline = 'original' } = this.appearance;
+    const originalAppearance = (scale === undefined ? size === 'medium' : scale === 100) && background === 'original' && shadow === 'original' && outline === 'original';
 
     const style = typeof getComputedStyle === "function" ? getComputedStyle(this.video) : null;
     const fontSize = parseFloat(style?.fontSize || "18") || 18;
@@ -357,7 +369,7 @@ export class SubtitleController {
         this.cueRows.set(cue, {key, rows});
         // Preserve deliberately placed/vertical cues at position zero, but keep
         // ordinary bottom captions inside the viewport even with large fonts.
-        const managed = this.height > 0 || (!cue.vertical && original.line === "auto");
+        const managed = this.height > 0 || (!cue.vertical && original.line === "auto" && (lifted || !originalAppearance));
         const line = managed ? -paddingLines - rows : original.line;
         const snap = managed ? true : original.snapToLines;
         if (cue.line === line && cue.snapToLines === snap && cached?.key === key) continue;

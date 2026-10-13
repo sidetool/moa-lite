@@ -170,6 +170,7 @@ try {
   assert(mediaRequests.includes('/play')); assert(mediaRequests.some(url=>url.endsWith('.ts')));
   console.log('PASS extensionless HLS actually plays in original player');
   await a.goto(origin + '/settings');
+  await a.getByRole('navigation', { name: '설정 메뉴' }).getByRole('link', { name: '정보', exact: true }).click();
   await a.getByRole('link', { name: /진단 · 할당량/ }).click();
   await a.getByText('Node CPU 누적', { exact: true }).waitFor();
   assert.equal(await a.getByRole('link', { name: 'Vercel Usage 열기' }).getAttribute('href'), 'https://vercel.com/dashboard/usage');

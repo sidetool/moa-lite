@@ -9,6 +9,8 @@ export const syncSchema: Record<string, { key: string[]; fields: string[]; refs?
   tmdb_links: { key: ['media_id'], fields: ['media_id', 'kind', 'tmdb_id', 'season', 'status', 'score', 'checked_at'], refs: { media_id: 'media' } },
   progress: { key: ['profile_id', 'episode_id'], fields: ['profile_id', 'episode_id', 'position', 'duration', 'completed', 'updated_at'], refs: { profile_id: 'profiles', episode_id: 'episodes' } },
   watchlist: { key: ['profile_id', 'media_id'], fields: ['profile_id', 'media_id', 'added_at'], refs: { profile_id: 'profiles', media_id: 'media' } },
+  lite_work_identity: { key: ['media_id'], fields: ['media_id', 'value'], refs: { media_id: 'media' } },
+  lite_episode_identity: { key: ['episode_id'], fields: ['episode_id', 'value'], refs: { episode_id: 'episodes' } },
   title_group_overrides: { key: ['profile_id', 'media_id'], fields: ['profile_id', 'media_id', 'group_id'], refs: { profile_id: 'profiles', media_id: 'media' } }
 };
 export function syncOrder(key: string) { return Object.keys(syncSchema).indexOf(JSON.parse(key)[0]); }

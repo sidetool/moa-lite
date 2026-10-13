@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, mkdir, symlink, readdir, writeFile } from 'node:fs/promises';
+import { readFile, copyFile, mkdir, symlink, readdir, writeFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 
@@ -10,6 +10,8 @@ export async function compareOriginalUi(browser: Browser, lite: Page, api: (path
   await mkdir(reference, { recursive: true });
   const archive = execFileSync('git', ['archive', 'a7ff835e76b9769432f00dcadaad788993464c92', 'apps/web'], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   execFileSync('tar', ['-x', '-C', reference], { input: archive });
+  // Fingerprints of these approved upstream styles are checked in ui-preservation.test.ts.
+  for (const name of ['components','pages','player']) await copyFile(resolve(root,`apps/web/src/styles/${name}.css`),resolve(reference,`apps/web/src/styles/${name}.css`));
   await symlink(resolve(root, 'apps/web/node_modules'), resolve(reference, 'apps/web/node_modules')).catch((error: any) => { if (error.code !== 'EEXIST') throw error; });
   execFileSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], { cwd: resolve(reference, 'apps/web'), env: { ...process.env, VITE_MOA_LITE: '0', VITE_MOCK: '0' }, stdio: 'pipe' });
   const dist = resolve(reference, 'apps/web/dist');

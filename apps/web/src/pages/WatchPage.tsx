@@ -1,10 +1,12 @@
+import { mergePlaybackMarkers } from '../player/skip-markers';
+import { SubtitleStyleControls } from '../components/SubtitleStyleControls';
 import { documentPipSupported, useDocumentPip } from "../player/document-pip";
 import { createPortal } from "react-dom";
 import { importSubtitleFile, SUBTITLE_FILES } from '../player/subtitle-files';
 import { preparePlayback, retirePlayback } from '../player/session-lifecycle';
-import { subtitlesOffForTitle, rememberSubtitlesOff, subtitleOffsetForTitle, rememberSubtitleOffset, subtitlePreference, rememberSubtitle, restoreSubtitle } from "../player/subtitle-preference";
+import { subtitlesOffForTitle, rememberSubtitlesOff, subtitleOffsetForEpisode, rememberSubtitleOffset, subtitlePreference, rememberSubtitle, restoreSubtitle } from "../player/subtitle-preference";
 import { enterFullscreen } from "../lib/playback-fullscreen";
-import { devicePrefs, setDevicePref } from "../lib/device-prefs";
+import { useDevicePrefs, setDevicePref } from "../lib/device-prefs";
 import { isRemoteMode, type RemotePlayerEvent } from "../lib/remote";
 import { PlaybackSources } from '../components/PlaybackSources';
 import {
@@ -15,7 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { OnlineSubtitleQuery, OnlineSubtitleSearch, PlaybackSession, SubtitleTrack } from "@moa/shared";
-import { useMe, useMedia, useSettings } from "../api/queries";
+import { useMe, useMedia, useSettings, useSaveSettings } from "../api/queries";
 import { cancelTranslationJob, coveredUntil, isTranslationTrack, savedTranslations, translationModeOf, untranslatedGap, useTranslationConfig, type TranslatedRange, type TranslationJob } from "../api/translation";
 import { useSubtitleTranslation } from "../player/subtitle-translation";
 import { hasUnlabelledSiteSubtitle } from "../player/subtitle-language";
@@ -30,7 +32,7 @@ import { api, ApiError } from "../lib/api";
 
 const KIDS_RESTRICTED = "어린이 프로필에서는 볼 수 없는 작품이에요";
 import { clock, cx, episodeTitle } from "../lib/format";
-import { attach, detectCapabilities, compatibilityPlayback, setCompatibilityPlayback, SubtitleController, type EngineHandle, type SubtitleAppearance } from "../player/engine";
+import { attach, detectCapabilities, compatibilityPlayback, setCompatibilityPlayback, SubtitleController, type EngineHandle } from "../player/engine";
 
 type Panel = null | "subs" | "settings" | "episodes";
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -61,7 +63,7 @@ function useSession(episodeId: string, startOverride: number | null) {
       created = result;
       if (cancelled) await retirePlayback(result.sessionId, result.runtimeDependent);
       else setSession(result);
-    }).catch(e => { if (!cancelled) setError(e instanceof ApiError && e.code === "kids-restricted" ? KIDS_RESTRICTED : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'source_browser_unavailable' ? '이 소스는 WebView 실행이 필요해 moa-lite에서 지원하지 않아요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'playback-stream-unavailable' ? '선택한 서버를 재생할 수 없어요. 다시 시도하면 서버를 자동 선택해요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && ['source-no-videos', 'source-no-playable-video'].includes(e.code) ? '이 회차에서 재생할 수 있는 영상을 찾지 못했어요. 소스 설정을 확인하거나 다른 소스를 선택해 주세요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && ['source-invalid-response', 'source-video-extraction-failed'].includes(e.code) ? '소스에서 재생 가능한 영상을 찾지 못했어요. 다른 소스를 선택해 주세요.' : e instanceof ApiError && e.code === "apk_playback_capacity" ? "다른 기기에서 재생 중입니다. 재생이 끝난 뒤 다시 시도해 주세요." : "재생을 준비하지 못했습니다."); });
+    }).catch(e => { if (!cancelled) setError(e instanceof ApiError && e.code === "kids-restricted" ? KIDS_RESTRICTED : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'source_browser_unavailable' ? '이 소스는 브라우저 실행·인증 기능이 필요해 moa-lite에서 지원하지 않아요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && e.code === 'playback-stream-unavailable' ? '선택한 서버를 재생할 수 없어요. 다시 시도하면 서버를 자동 선택해요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && ['source-no-videos', 'source-no-playable-video'].includes(e.code) ? '이 회차에서 재생할 수 있는 영상을 찾지 못했어요. 소스 설정을 확인하거나 다른 소스를 선택해 주세요.' : import.meta.env.VITE_MOA_LITE === '1' && e instanceof ApiError && ['source-invalid-response', 'source-video-extraction-failed'].includes(e.code) ? '소스에서 재생 가능한 영상을 찾지 못했어요. 다른 소스를 선택해 주세요.' : e instanceof ApiError && e.code === "apk_playback_capacity" ? "다른 기기에서 재생 중입니다. 재생이 끝난 뒤 다시 시도해 주세요." : "재생을 준비하지 못했습니다."); });
     return () => {
       cancelled = true;
       if (created) void retirePlayback(created.sessionId, created.runtimeDependent);
@@ -126,7 +128,8 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(true);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState<{ sessionId: string; seconds: number }>();
+  const duration = mediaDuration?.sessionId === session?.sessionId ? mediaDuration?.seconds ?? 0 : 0;
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(() => Number(localStorage.getItem(VOLUME_KEY) ?? 1));
   const [muted, setMuted] = useState(false);
@@ -147,7 +150,7 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
   const [nextDismissed, setNextDismissed] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [flash, setFlash] = useState<{ key: number; side: "left" | "right" | "center"; label: string } | null>(null);
-  const [prefs] = useState(devicePrefs);
+  const prefs = useDevicePrefs();
   const step = prefs.seekStep;
   const [boost, setBoost] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -155,21 +158,17 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
   const [level, setLevel] = useState(-1);
   const [subOffset, setSubOffset] = useState(0);
   const subOffsetRef = useRef(0);
-  const [subHeight, setSubHeight] = useState(() => { try { const saved=localStorage.getItem('moa.subtitleHeight'); return saved === null ? 8 : Math.max(0,Math.min(30,Number(saved) || 0)); } catch { return 8; } });
-  const changeSubHeight = (value:number) => { setSubHeight(value); try { localStorage.setItem('moa.subtitleHeight',String(value)); } catch {} };
-  useEffect(() => { subs.current?.setHeight(subHeight); },[subHeight,subtitle,session]);
-  const [appearance, setAppearance] = useState<SubtitleAppearance | null>(() => {
-    try { const value = JSON.parse(localStorage.getItem('moa.subtitleAppearance') || 'null');
-      return value && ['small','medium','large','xlarge'].includes(value.size) && ['original','none','soft','solid'].includes(value.background) ? value : null;
-    } catch { return null; }
-  });
-  const subSize = appearance?.size ?? settings?.subtitleSize ?? 'medium';
-  const subBackground = appearance?.background ?? 'original';
-  const changeAppearance = (patch: Partial<SubtitleAppearance>) => {
-    const value = { size: subSize, background: subBackground, ...patch };
-    setAppearance(value); try { localStorage.setItem('moa.subtitleAppearance', JSON.stringify(value)); } catch {}
-  };
-  useEffect(() => { void subs.current?.setAppearance({size:subSize,background:subBackground}).catch(() => {}); }, [subSize,subBackground,subtitle,session]);
+  const saveSettings = useSaveSettings();
+  const subSize = settings?.subtitleSize ?? 'medium';
+  const subHeight = settings?.subtitleHeight ?? 0;
+  const subBackground = settings?.subtitleBackground ?? 'original';
+  const subShadow = settings?.subtitleShadow ?? 'original';
+  const subOutline = settings?.subtitleOutline ?? 'original';
+  const subScale = settings?.subtitleScale ?? undefined;
+  const subPadding = settings?.subtitlePadding ?? 6;
+  const originalSubAppearance = (subScale === undefined ? subSize === 'medium' : subScale === 100) && subBackground === 'original' && subShadow === 'original' && subOutline === 'original' && subHeight === 0;
+  useEffect(() => { subs.current?.setHeight(subHeight); }, [subHeight, subtitle, session]);
+  useEffect(() => { void subs.current?.setAppearance({ size: subSize, background: subBackground, shadow: subShadow, outline: subOutline, scale: subScale, padding: subPadding }).catch(() => {}); }, [subSize, subBackground, subShadow, subOutline, subScale, subPadding, subtitle, session]);
   const [extraSubs, setExtraSubs] = useState<SubtitleTrack[]>(() => carry?.track ? [carry.track] : []);
   const [online, setOnline] = useState<{ status: "idle" | "searching" | "done" | "error"; result?: OnlineSubtitleSearch; applying?: string }>({ status: "idle" });
   const [notice, setNotice] = useState<string | { text: string; action: { label: string; run: () => void } } | null>(null);
@@ -236,7 +235,7 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
     }).catch(() => { if(!disposed) onFailure("이 영상을 재생하지 못했습니다."); });
     subs.current = new SubtitleController(v, session.fonts);
     subs.current.setHeight(subHeight);
-    void subs.current.setAppearance({size:subSize,background:subBackground}).catch(()=>{});
+    void subs.current.setAppearance({size:subSize,background:subBackground,shadow:subShadow,outline:subOutline,scale:subScale,padding:subPadding}).catch(()=>{});
     return () => {
       disposed = true;
       failPlayback.current = ()=>{};
@@ -579,12 +578,12 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
     const next = Math.round((subOffset + delta) * 10) / 10;
     setSubOffset(next); subOffsetRef.current = next;
     subs.current?.setOffset(next);
-    if (session && devicePrefs().rememberSubOffset) rememberSubtitleOffset(session.mediaId, next);
+    if (session) rememberSubtitleOffset(episodeId, next);
   };
-  // Timing usually matches across a release group's episodes, so the offset follows the title.
+  // Timing belongs to this episode and device, never to the next release.
   useEffect(() => {
     if (!session) return;
-    const saved = carry?.offset ?? (devicePrefs().rememberSubOffset ? subtitleOffsetForTitle(session.mediaId) : 0);
+    const saved = carry?.offset ?? subtitleOffsetForEpisode(episodeId);
     subOffsetRef.current = saved; setSubOffset(saved);
     subs.current?.setOffset(saved);
   }, [session?.mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -695,20 +694,33 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
   };
 
   /* ---------- next-up ---------- */
-  const [remoteMarkers, setRemoteMarkers] = useState<PlaybackSession['markers']>();
+  const [remoteMarkerState, setRemoteMarkerState] = useState<{ sessionId: string; markers: PlaybackSession['markers'] }>();
   const [skipStatus, setSkipStatus] = useState('idle');
-  const markerDuration = Math.round(total);
+  const markerSessionId = session?.sessionId;
+  // HLS metadata can refine duration after playback begins. Do not query using
+  // a catalogue estimate, or reuse the previous stream's decoded duration.
+  const markerDuration = Math.round(duration);
+  // Local, source and saved playback all ask for markers bound to this playback session.
+  const remoteSkip = Boolean(session && !live && session.mediaType === 'anime');
   useEffect(() => {
-    setRemoteMarkers(undefined); setSkipStatus('idle');
-    if (!session?.streams?.length || live || session.mediaType !== 'anime' || markerDuration < 60) return;
+    setSkipStatus('idle');
+    if (!remoteSkip || !markerSessionId || markerDuration < 60 || !Number.isFinite(markerDuration)) return;
     const controller = new AbortController();
     setSkipStatus('loading');
-    void api<{markers:PlaybackSession['markers']|null;status:string}>(`/episodes/${encodeURIComponent(episodeId)}/markers?duration=${markerDuration}`,{signal:controller.signal}).then(result=>{
-      if (!controller.signal.aborted) { setRemoteMarkers(result.markers ?? undefined); setSkipStatus(result.status); }
+    void api<{markers:PlaybackSession['markers']|null;status:string}>(`/episodes/${encodeURIComponent(episodeId)}/markers?${new URLSearchParams({ duration: String(markerDuration), sessionId: markerSessionId })}`,{signal:controller.signal}).then(result=>{
+      if (controller.signal.aborted) return;
+      // AniSkip can return only OP or ED for a different episodeLength. A
+      // partial/failed refresh is not a deletion of this session's known range.
+      setRemoteMarkerState(previous => ({
+        sessionId: markerSessionId,
+        markers: result.markers ? mergePlaybackMarkers(result.markers,previous?.sessionId === markerSessionId ? previous.markers : undefined)
+          : previous?.sessionId === markerSessionId ? previous.markers : undefined
+      }));
+      setSkipStatus(result.status);
     }).catch(()=>{if(!controller.signal.aborted)setSkipStatus('error');});
     return ()=>controller.abort();
-  },[session,episodeId,markerDuration,live]);
-  const markers = session?.markers ?? remoteMarkers;
+  },[remoteSkip,markerSessionId,episodeId,markerDuration]);
+  const markers = mergePlaybackMarkers(session?.markers,remoteSkip && remoteMarkerState?.sessionId === markerSessionId ? remoteMarkerState?.markers : undefined);
   // Post-credits content (> 20s after the ending song) means the episode is
   // not over at the credits: offer "skip ending" and save next-up for the end.
   const postCredits = Boolean(markers?.creditsEnd && total && total - markers.creditsEnd > 20);
@@ -991,8 +1003,8 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
   return (
     <div
       ref={root}
-      className={cx("player", chrome ? "is-chrome" : "is-idle", playing && "is-playing", fill && "is-fill", `cue-${subSize}`, `cue-bg-${subBackground}`)}
-      style={{ "--video-height": videoHeight ? `${videoHeight}px` : undefined, "--subtitle-lift": `${chrome ? Math.max(15,subHeight) : subHeight}%` } as React.CSSProperties}
+      className={cx("player", chrome ? "is-chrome" : "is-idle", playing && "is-playing", fill && "is-fill", !originalSubAppearance && "cue-custom", `cue-${subSize}`, `cue-bg-${subBackground}`)}
+      style={{ "--video-height": videoHeight ? `${videoHeight}px` : undefined, "--subtitle-font-size": subScale ? `max(10px, calc(${videoHeight || 360}px * .046 * ${subScale / 100}))` : undefined } as React.CSSProperties}
       onPointerMove={event => { if (event.pointerType !== "touch") poke(); }}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
       onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); void addSubtitleFiles(Array.from(event.dataTransfer.files)); } }}
@@ -1011,7 +1023,8 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
         onWaiting={() => setWaiting(true)}
         onPlaying={() => setWaiting(false)}
         onCanPlay={() => setWaiting(false)}
-        onLoadedMetadata={event => { setDuration(event.currentTarget.duration); setLevels(engine.current?.levels() ?? []); }}
+        onDurationChange={event => { if (session) setMediaDuration({sessionId: session.sessionId, seconds: event.currentTarget.duration}); }}
+        onLoadedMetadata={event => { if (session) setMediaDuration({sessionId: session.sessionId, seconds: event.currentTarget.duration}); setLevels(engine.current?.levels() ?? []); }}
         onTimeUpdate={event => {
           const v = event.currentTarget;
           setTime(v.currentTime);
@@ -1279,23 +1292,7 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
           )}
           {panel === "subs" && subsView === "style" && (
             <div className="panel-body panel-form">
-              <div className="pf-row">
-                <span className="pf-label">크기</span>
-                <div className="seg" role="group" aria-label="자막 크기">{(["small", "medium", "large", "xlarge"] as const).map((size, i) => <button key={size} className={cx(subSize === size && "is-active")} aria-pressed={subSize === size} onClick={() => changeAppearance({ size })}>{["작게", "보통", "크게", "더 크게"][i]}</button>)}</div>
-              </div>
-              <div className="pf-row">
-                <span className="pf-label">배경</span>
-                <div className="seg" role="group" aria-label="자막 배경">{(["original", "none", "soft", "solid"] as const).map((background, i) => <button key={background} className={cx(subBackground === background && "is-active")} aria-pressed={subBackground === background} onClick={() => changeAppearance({ background })}>{["기본", "없음", "옅게", "진하게"][i]}</button>)}</div>
-              </div>
-              <div className="pf-row">
-                <span className="pf-label">위치</span>
-                <div className="pf-range">
-                  <input type="range" min={0} max={30} step={1} value={subHeight} aria-label="자막 높이" onChange={e => changeSubHeight(Number(e.target.value))} style={{ "--fill": `${subHeight / 30 * 100}%` } as React.CSSProperties} />
-                  <output>{subHeight === 0 ? "원래" : `+${subHeight}%`}</output>
-                  {subHeight !== 8 && <button className="pf-reset" onClick={() => changeSubHeight(8)}>기본</button>}
-                </div>
-              </div>
-              <div className="pf-row">
+              <div className="pf-block">
                 <span className="pf-label">싱크</span>
                 <div className="sync-row">
                   <button className="seg-btn" aria-label="-0.5" onClick={() => nudgeSubs(-0.5)}>−0.5</button>
@@ -1304,8 +1301,12 @@ function WatchPlayer({ episodeId, fullscreenHost, pip: documentPip, carry, onCar
                   <button className="seg-btn" aria-label="+0.1" onClick={() => nudgeSubs(0.1)}>+0.1</button>
                   <button className="seg-btn" aria-label="+0.5" onClick={() => nudgeSubs(0.5)}>+0.5</button>
                 </div>
+                <p className="panel-note">자막이 늦게 나오면 −, 빨리 나오면 +. 이 영상과 기기에만 저장돼요.</p>
               </div>
-              <p className="panel-note">자막이 늦게 나오면 −, 빨리 나오면 +. {devicePrefs().rememberSubOffset ? "싱크는 이 작품의 다음 회차에도 이어져요. " : ""}크기·배경·위치는 이 기기에 저장돼요. 영상에 입혀진 자막은 바뀌지 않습니다.</p>
+              <div className="pf-block">
+                <span className="pf-label">모양</span>
+                {settings && <SubtitleStyleControls variant="player" format={subtitle?.format} settings={settings} save={patch => void saveSettings(patch).catch(() => setNotice('자막 설정을 저장하지 못했어요. 다시 시도해 주세요.'))} />}
+              </div>
             </div>
           )}
           {panel === "subs" && subsView === "translate" && (

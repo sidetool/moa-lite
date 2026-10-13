@@ -1,0 +1,9 @@
+{
+  "ref": "f31084a21bb16cbbf165a31e43d1a2f397105994",
+  "normalization": "Omit optional Noto Sans CJK JP font family; no extra font asset in Lite.",
+  "styles": {
+    "apps/web/src/styles/components.css": "4ddb373eb0fc90cc51b5a34775193bb7f66041927231e3e5ddaf19c7f0f0f755",
+    "apps/web/src/styles/pages.css": "da21fe1b95f3914367c062d1d686ed02693b47861bfa7de37a44ae11c493297c",
+    "apps/web/src/styles/player.css": "395a3017ca33119bebb056f24dee506632aac761165a55f5b3fe572122f176ad"
+  }
+}
